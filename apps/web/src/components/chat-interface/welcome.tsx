@@ -107,7 +107,7 @@ const QuickStartButtons = (props: QuickStartButtonsProps) => {
             className="text-gray-500 hover:text-gray-700 transition-colors ease-in rounded-2xl flex items-center justify-center gap-2 w-[250px] h-[64px]"
             onClick={() => props.handleQuickStart("text")}
           >
-            New Markdown
+            Untitled document
             <NotebookPen />
           </Button>
           <ProgrammingLanguagesDropdown handleSubmit={handleLanguageSubmit} />

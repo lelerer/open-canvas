@@ -20,6 +20,9 @@ import { useGraphContext } from "@/contexts/GraphContext";
 import { ArtifactHeader } from "./header";
 import { useUserContext } from "@/contexts/UserContext";
 import { useAssistantContext } from "@/contexts/AssistantContext";
+import { useThreadContext } from "@/contexts/ThreadProvider";
+
+const UNTITLED_DOCUMENT_TITLE = "Untitled document";
 
 export interface ArtifactRendererProps {
   isEditing: boolean;
@@ -38,6 +41,7 @@ function ArtifactRendererComponent(props: ArtifactRendererProps) {
   const { graphData } = useGraphContext();
   const { selectedAssistant } = useAssistantContext();
   const { user } = useUserContext();
+  const { setThreadId } = useThreadContext();
   const {
     artifact,
     selectedBlocks,
@@ -48,6 +52,9 @@ function ArtifactRendererComponent(props: ArtifactRendererProps) {
     setMessages,
     streamMessage,
     setSelectedBlocks,
+    setArtifact,
+    setChatStarted,
+    setIsStreaming,
   } = graphData;
   const editorRef = useRef<EditorView | null>(null);
   const artifactContentRef = useRef<HTMLDivElement>(null);
@@ -64,6 +71,7 @@ function ArtifactRendererComponent(props: ArtifactRendererProps) {
   const [inputValue, setInputValue] = useState("");
   const [isHoveringOverArtifact, setIsHoveringOverArtifact] = useState(false);
   const [isValidSelectionOrigin, setIsValidSelectionOrigin] = useState(false);
+  const [textRendererKey, setTextRendererKey] = useState(0);
 
   const handleMouseUp = useCallback(() => {
     const selection = window.getSelection();
@@ -305,6 +313,30 @@ function ArtifactRendererComponent(props: ArtifactRendererProps) {
     currentArtifactContent.index === artifact.contents.length ||
     isStreaming;
 
+  const resetToEmptyCanvas = () => {
+    if (isStreaming) return;
+
+    setMessages([]);
+    setSelectedBlocks(undefined);
+    setThreadId(null);
+    setIsStreaming(false);
+    setChatStarted(true);
+    setArtifact({
+      currentIndex: 1,
+      contents: [
+        {
+          index: 1,
+          type: "text",
+          title: UNTITLED_DOCUMENT_TITLE,
+          fullMarkdown: "",
+        },
+      ],
+    });
+    setTextRendererKey((key) => key + 1);
+    props.setIsEditing(true);
+    handleCleanupState();
+  };
+
   return (
     <div className="relative w-full h-full max-h-screen overflow-auto">
       <ArtifactHeader
@@ -318,6 +350,8 @@ function ArtifactRendererComponent(props: ArtifactRendererProps) {
         artifactUpdateFailed={artifactUpdateFailed}
         chatCollapsed={props.chatCollapsed}
         setChatCollapsed={props.setChatCollapsed}
+        resetToEmptyCanvas={resetToEmptyCanvas}
+        isStreaming={isStreaming}
       />
       <div
         ref={contentRef}
@@ -340,6 +374,7 @@ function ArtifactRendererComponent(props: ArtifactRendererProps) {
           >
             {currentArtifactContent.type === "text" ? (
               <TextRenderer
+                key={textRendererKey}
                 isInputVisible={isInputVisible}
                 isEditing={props.isEditing}
                 isHovering={isHoveringOverArtifact}

@@ -18,6 +18,10 @@ import { z } from "zod";
 
 /**
  * Generate a new artifact based on the user's query.
+ *
+ * Uses the streaming `generate_artifact` tool so the frontend can render the
+ * artifact into the canvas live. The 7-section study-design structure is
+ * enforced via NEW_ARTIFACT_PROMPT (see prompts.ts).
  */
 export const generateArtifact = async (
   state: typeof OpenCanvasGraphAnnotation.State,
@@ -27,7 +31,7 @@ export const generateArtifact = async (
     isToolCalling: true,
   });
   const smallModel = await getModelFromConfig(config, {
-    temperature: 0.5,
+    temperature: 0,
     isToolCalling: true,
   });
 

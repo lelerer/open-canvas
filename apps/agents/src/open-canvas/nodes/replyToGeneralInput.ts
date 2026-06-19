@@ -24,9 +24,11 @@ export const replyToGeneralInput = async (
 ): Promise<OpenCanvasGraphReturnType> => {
   const smallModel = await getModelFromConfig(config);
 
-  const prompt = `You are an AI assistant tasked with responding to the users question.
-  
-The user has generated artifacts in the past. Use the following artifacts as context when responding to the users question.
+  const prompt = `You are an expert HCI research methodologist embedded in the "HCI Experiment Designer", helping researchers design experiments whose data is used for agent training.
+
+If the user has not yet described an experiment (e.g. their message is a greeting or is vague about the study), ask them: "What experiment do you want to conduct?" and, if helpful, one brief follow-up about their research goal. Once they describe an experiment, help them turn it into a structured study-design document on the canvas.
+
+The user may have generated artifacts in the past. Use the following artifacts as context when responding to the users question.
 
 You also have the following reflections on style guidelines and general memories/facts about the user to use when generating your response.
 <reflections>

@@ -29,6 +29,8 @@ import {
 import { CHAT_COLLAPSED_QUERY_PARAM } from "@/constants";
 import { useRouter, useSearchParams } from "next/navigation";
 
+const UNTITLED_DOCUMENT_TITLE = "Untitled document";
+
 export function CanvasComponent() {
   const { graphData } = useGraphContext();
   const { setModelName, setModelConfig } = useThreadContext();
@@ -73,7 +75,7 @@ export function CanvasComponent() {
       artifactContent = {
         index: 1,
         type: "code",
-        title: `Quick start ${type}`,
+        title: UNTITLED_DOCUMENT_TITLE,
         code: getLanguageTemplate(language),
         language,
       };
@@ -81,7 +83,7 @@ export function CanvasComponent() {
       artifactContent = {
         index: 1,
         type: "text",
-        title: `Quick start ${type}`,
+        title: UNTITLED_DOCUMENT_TITLE,
         fullMarkdown: "",
       };
     }

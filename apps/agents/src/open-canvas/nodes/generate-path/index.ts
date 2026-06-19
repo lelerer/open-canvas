@@ -138,6 +138,26 @@ export async function generatePath(
       })
     : state._messages;
 
+  // HCI Experiment Designer: this app exists to generate study-design
+  // documents. When there is no artifact yet, always generate one instead of
+  // letting the LLM router (unreliable on small models) send the message to a
+  // plain chat reply. Once an artifact exists, fall back to the LLM router to
+  // decide between rewriting it and replying.
+  if (!state.artifact) {
+    const messages = newMessages.length
+      ? {
+          messages: newMessages,
+          _messages: [...newInternalMessageList, ...newMessages],
+        }
+      : {
+          _messages: newInternalMessageList,
+        };
+    return {
+      next: "generateArtifact",
+      ...messages,
+    };
+  }
+
   const routingResult = await dynamicDeterminePath({
     state: {
       ...state,

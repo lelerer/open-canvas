@@ -213,7 +213,8 @@ export const getModelConfig = (
   if (
     customModelName.includes("gpt-") ||
     customModelName.includes("o1") ||
-    customModelName.includes("o3")
+    customModelName.includes("o3") ||
+    customModelName.includes("o4")
   ) {
     let actualModelName = providerConfig.modelName;
     if (extra?.isToolCalling && actualModelName.includes("o1")) {
@@ -362,22 +363,13 @@ export async function getModelFromConfig(
     ...extra,
   };
 
-  const isLangChainUserModel = LANGCHAIN_USER_ONLY_MODELS.some(
-    (m) => m === modelName
-  );
-  if (isLangChainUserModel) {
-    const user = await getUserFromConfig(config);
-    if (!user) {
-      throw new Error(
-        "Unauthorized. Can not use LangChain only models without a user."
-      );
-    }
-    if (!user.email?.endsWith("@langchain.dev")) {
-      throw new Error(
-        "Unauthorized. Can not use LangChain only models without a user with a @langchain.dev email."
-      );
-    }
-  }
+  // Self-hosted instance: the original code gated "LangChain only" models
+  // (gpt-4.1, gpt-4o, o1, etc.) behind a @langchain.dev account. That gate is
+  // intentionally removed so these models can be used with this instance's own
+  // OpenAI key. (`LANGCHAIN_USER_ONLY_MODELS` / `getUserFromConfig` remain
+  // available if you want to restore the check.)
+  void LANGCHAIN_USER_ONLY_MODELS;
+  void getUserFromConfig;
 
   const includeStandardParams = !TEMPERATURE_EXCLUDED_MODELS.some(
     (m) => m === modelName

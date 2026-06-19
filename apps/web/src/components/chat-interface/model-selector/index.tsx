@@ -7,11 +7,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import {
-  ALL_MODEL_NAMES,
-  ALL_MODELS,
-  LANGCHAIN_USER_ONLY_MODELS,
-} from "@opencanvas/shared/models";
+import { ALL_MODEL_NAMES, ALL_MODELS } from "@opencanvas/shared/models";
 import {
   Dispatch,
   SetStateAction,
@@ -136,61 +132,18 @@ export default function ModelSelector({
     [setModelName]
   );
 
-  const allAllowedModels = ALL_MODELS.filter((model) => {
-    if (
-      !isLangChainUser &&
-      LANGCHAIN_USER_ONLY_MODELS.some((m) => m === model.name)
-    ) {
-      return false;
-    }
-
-    if (
-      model.name.includes("fireworks/") &&
-      process.env.NEXT_PUBLIC_FIREWORKS_ENABLED === "false"
-    ) {
-      return false;
-    }
-    if (
-      model.name.includes("claude-") &&
-      process.env.NEXT_PUBLIC_ANTHROPIC_ENABLED === "false"
-    ) {
-      return false;
-    }
-    if (
-      model.name.includes("gpt-") &&
-      process.env.NEXT_PUBLIC_OPENAI_ENABLED === "false"
-    ) {
-      return false;
-    }
-    if (
-      model.name.includes("azure/") &&
-      process.env.NEXT_PUBLIC_AZURE_ENABLED === "false"
-    ) {
-      return false;
-    }
-    if (
-      model.name.includes("gemini-") &&
-      process.env.NEXT_PUBLIC_GEMINI_ENABLED === "false"
-    ) {
-      return false;
-    }
-    if (
-      model.name.includes("ollama-") &&
-      process.env.NEXT_PUBLIC_OLLAMA_ENABLED === "false"
-    ) {
-      return false;
-    }
-
-    if (
-      model.name.includes("groq/") &&
-      process.env.NEXT_PUBLIC_GROQ_ENABLED === "false"
-    ) {
-      return false;
-    }
-
-    // By default, return true if the environment variable is not set or is set to true
-    return true;
-  });
+  void isLangChainUser;
+  // Self-hosted: show only a small curated set of OpenAI models that work with
+  // this instance's OpenAI key, instead of the full multi-provider list.
+  const DISPLAYED_MODELS: string[] = [
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4o",
+    "gpt-4o-mini",
+  ];
+  const allAllowedModels = ALL_MODELS.filter((model) =>
+    DISPLAYED_MODELS.includes(model.name)
+  );
 
   const selectedModelLabel =
     ALL_MODELS.find((m) => m.name === modelName)?.label || modelName;

@@ -23,6 +23,8 @@ const cleanText = (text: string) => {
   return text.replaceAll("\\\n", "\n");
 };
 
+const UNTITLED_DOCUMENT_TITLE = "Untitled document";
+
 function ViewRawText({
   isRawView,
   setIsRawView,
@@ -191,7 +193,7 @@ export function TextRendererComponent(props: TextRendererProps) {
             {
               index: 1,
               fullMarkdown: fullMarkdown,
-              title: "Untitled",
+              title: UNTITLED_DOCUMENT_TITLE,
               type: "text",
             },
           ],
@@ -224,7 +226,7 @@ export function TextRendererComponent(props: TextRendererProps) {
             {
               index: 1,
               fullMarkdown: newRawMarkdown,
-              title: "Untitled",
+              title: UNTITLED_DOCUMENT_TITLE,
               type: "text",
             },
           ],

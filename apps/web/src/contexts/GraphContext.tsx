@@ -307,9 +307,11 @@ export function GraphProvider({ children }: { children: ReactNode }) {
       artifact,
       ...params,
       ...messagesInput,
-      ...(selectedBlocks && {
-        highlightedText: selectedBlocks,
-      }),
+      // Highlight-to-edit is intentionally disabled: it is unreliable on
+      // formatted/markdown content and causes "Original artifact not found" /
+      // selection-mismatch errors when a stale selection is in state. All edits
+      // go through the chat (rewrite) path instead. To re-enable, restore:
+      //   ...(selectedBlocks && { highlightedText: selectedBlocks }),
       webSearchEnabled: searchEnabled,
     };
     // Add check for multiple defined fields
