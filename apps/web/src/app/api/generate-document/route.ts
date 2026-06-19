@@ -58,7 +58,7 @@ const TEMPLATE = `# What experiment do you want to conduct?
 ## 7.2 Agent
 [the AI model/agent that learns from the training data and produces the predictions participants evaluate]`;
 
-const SYSTEM_PROMPT = `You are an expert HCI and experimental-methodology assistant. A researcher has answered an interview about a planned user study. Turn their answers into a complete, rigorous experiment-design document.
+const SYSTEM_PROMPT = `You are an expert HCI and experimental-methodology assistant. A researcher has answered an input about a planned user study. Turn their answers into a complete, rigorous experiment-design document.
 
 Produce the document following EXACTLY this template — same section order, same headers, same markdown tables:
 
@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
           {
             role: "user",
             content:
-              "Here is my interview transcript. Compile it into the final document, following the rules.\n\n" +
+              "Here is my input. Compile it into the final document, following the rules.\n\n" +
               transcript,
           },
         ],
