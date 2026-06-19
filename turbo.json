@@ -4,6 +4,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
+      "env": ["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"],
       "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
     },
     "lint": {
