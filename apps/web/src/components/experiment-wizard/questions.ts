@@ -1,5 +1,9 @@
 // The interview script. Each page asks ONE open question; the LLM turns the
 // collected answers into the final templated document.
+//
+// `required: true` marks a question as critical — the wizard blocks document
+// generation until all required questions are answered, unless the user turns
+// on Advanced mode.
 
 export type Answers = Record<string, string>;
 
@@ -10,6 +14,7 @@ export interface Question {
   prompt: string; // the question itself (shown big)
   hints?: string[]; // optional guiding points
   placeholder?: string;
+  required?: boolean; // critical section — gates generation
 }
 
 export const QUESTIONS: Question[] = [
@@ -19,6 +24,7 @@ export const QUESTIONS: Question[] = [
     section: "Getting started",
     prompt: "In a sentence or two, what experiment do you want to run?",
     placeholder: "e.g. I want to compare two XAI explanation styles and see how each affects users' trust calibration…",
+    required: true,
   },
   {
     id: "rq",
@@ -27,6 +33,7 @@ export const QUESTIONS: Question[] = [
     prompt: "What research questions are you trying to answer?",
     hints: ["List them as RQ1, RQ2, RQ3…", "Each should be clear and testable."],
     placeholder: "RQ1: …\nRQ2: …",
+    required: true,
   },
   {
     id: "variables",
@@ -40,6 +47,7 @@ export const QUESTIONS: Question[] = [
       "Random variables (not controlled, may vary).",
     ],
     placeholder: "Measure: … (e.g. trust calibration, 7-point Likert)\nManipulate: … (e.g. explanation type: saliency vs counterfactual)\nHold constant: …\nLeave random: …",
+    required: true,
   },
   {
     id: "design",
@@ -51,6 +59,7 @@ export const QUESTIONS: Question[] = [
       "How will you counterbalance / order trials and blocks (full / Latin square / none)? Justify if none.",
     ],
     placeholder: "Design: …\nCounterbalancing: …",
+    required: true,
   },
   {
     id: "participants",
@@ -63,6 +72,7 @@ export const QUESTIONS: Question[] = [
       "Consent and compensation.",
     ],
     placeholder: "…",
+    required: true,
   },
   {
     id: "apparatus",
@@ -79,6 +89,7 @@ export const QUESTIONS: Question[] = [
     prompt: "Walk me through one session, step by step.",
     hints: ["From arrival to debrief.", "Add rough durations and a total estimate."],
     placeholder: "1. …\n2. …\nTotal: ~ … min",
+    required: true,
   },
   {
     id: "dataset",

@@ -12,6 +12,7 @@ import {
   RotateCcw,
   ArrowLeft,
   FileText,
+  Lock,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -30,10 +31,15 @@ const STORAGE_KEY = "experiment-interview-v1";
 const ACCENT = "#359793";
 const CANVAS_STEP = QUESTIONS.length; // last step index
 
+function isAnswered(answers: Answers, id: string) {
+  return (answers[id] || "").trim().length > 0;
+}
+
 export function ExperimentWizard() {
   const [answers, setAnswers] = useState<Answers>({});
   const [step, setStep] = useState(0);
   const [loaded, setLoaded] = useState(false);
+  const [advancedMode, setAdvancedMode] = useState(false);
 
   useEffect(() => {
     try {
@@ -53,8 +59,15 @@ export function ExperimentWizard() {
   const onCanvas = step === CANVAS_STEP;
   const q = QUESTIONS[step];
 
+  const missingRequired = QUESTIONS.filter((item) => item.required && !isAnswered(answers, item.id));
+  const canGenerate = advancedMode || missingRequired.length === 0;
+
   function setAnswer(id: string, v: string) {
     setAnswers((a) => ({ ...a, [id]: v }));
+  }
+  function goToQuestion(id: string) {
+    const idx = QUESTIONS.findIndex((x) => x.id === id);
+    if (idx >= 0) setStep(idx);
   }
 
   return (
@@ -70,7 +83,8 @@ export function ExperimentWizard() {
         <nav className="flex-1 space-y-0.5 px-3 pb-4">
           {QUESTIONS.map((item, i) => {
             const active = i === step;
-            const done = (answers[item.id] || "").trim().length > 0;
+            const done = isAnswered(answers, item.id);
+            const missing = !!item.required && !done;
             return (
               <button
                 key={item.id}
@@ -83,13 +97,18 @@ export function ExperimentWizard() {
                 <span
                   className={cn(
                     "grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs",
-                    active || done ? "border-transparent text-white" : "border-neutral-300 text-neutral-400"
+                    active || done
+                      ? "border-transparent text-white"
+                      : missing
+                        ? "border-amber-400 text-amber-500"
+                        : "border-neutral-300 text-neutral-400"
                   )}
                   style={active || done ? { backgroundColor: ACCENT } : undefined}
                 >
                   {done && !active ? <Check className="h-3.5 w-3.5" /> : i + 1}
                 </span>
-                <span className={cn("truncate", active ? "text-neutral-900" : "text-neutral-600")}>{item.navTitle}</span>
+                <span className={cn("flex-1 truncate", active ? "text-neutral-900" : "text-neutral-600")}>{item.navTitle}</span>
+                {item.required && !done ? <span className="text-amber-500" title="Required">*</span> : null}
               </button>
             );
           })}
@@ -101,8 +120,11 @@ export function ExperimentWizard() {
               onCanvas ? "bg-neutral-100 font-medium" : "hover:bg-neutral-50"
             )}
           >
-            <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-white" style={{ backgroundColor: ACCENT }}>
-              <Sparkles className="h-3.5 w-3.5" />
+            <span
+              className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-white"
+              style={{ backgroundColor: canGenerate ? ACCENT : "#a3a3a3" }}
+            >
+              {canGenerate ? <Sparkles className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
             </span>
             <span className={cn("truncate", onCanvas ? "text-neutral-900" : "text-neutral-600")}>Document</span>
           </button>
@@ -120,13 +142,20 @@ export function ExperimentWizard() {
         </div>
 
         {onCanvas ? (
-          <DocumentCanvas answers={answers} onBack={() => setStep(CANVAS_STEP - 1)} />
+          <DocumentCanvas
+            answers={answers}
+            canGenerate={canGenerate}
+            missing={missingRequired.map((m) => m.navTitle)}
+            onEnableAdvanced={() => setAdvancedMode(true)}
+            onBack={() => setStep(CANVAS_STEP - 1)}
+          />
         ) : (
           <>
             <main className="flex-1 overflow-y-auto">
               <div className="mx-auto w-full max-w-2xl px-6 py-12">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em]" style={{ color: ACCENT }}>
                   {q.section} · Question {step + 1} of {CANVAS_STEP}
+                  {q.required ? <span className="ml-2 text-amber-500">• required</span> : <span className="ml-2 text-neutral-400">• optional</span>}
                 </p>
                 <h1 className="mt-3 text-2xl font-semibold leading-snug tracking-tight">{q.prompt}</h1>
                 {q.hints && q.hints.length > 0 && (
@@ -147,6 +176,16 @@ export function ExperimentWizard() {
                   className="mt-6 min-h-[200px] resize-y bg-white text-[15px] leading-relaxed"
                 />
                 <p className="mt-2 text-xs text-neutral-400">Answer in your own words — the AI will organise it into the template later.</p>
+
+                {/* On the last question, show readiness / gating */}
+                {step === CANVAS_STEP - 1 && (
+                  <GenerateGate
+                    missing={missingRequired}
+                    advancedMode={advancedMode}
+                    setAdvancedMode={setAdvancedMode}
+                    onJump={goToQuestion}
+                  />
+                )}
               </div>
             </main>
 
@@ -160,8 +199,9 @@ export function ExperimentWizard() {
                     Next <ChevronRight className="ml-1 h-4 w-4" />
                   </AccentButton>
                 ) : (
-                  <AccentButton onClick={() => setStep(CANVAS_STEP)}>
-                    <Sparkles className="mr-1.5 h-4 w-4" /> Generate document
+                  <AccentButton onClick={() => setStep(CANVAS_STEP)} disabled={!canGenerate}>
+                    {canGenerate ? <Sparkles className="mr-1.5 h-4 w-4" /> : <Lock className="mr-1.5 h-4 w-4" />}
+                    Generate document
                   </AccentButton>
                 )}
               </div>
@@ -186,6 +226,54 @@ function AccentButton({ children, onClick, disabled }: { children: ReactNode; on
   );
 }
 
+function GenerateGate({
+  missing,
+  advancedMode,
+  setAdvancedMode,
+  onJump,
+}: {
+  missing: { id: string; navTitle: string }[];
+  advancedMode: boolean;
+  setAdvancedMode: (v: boolean) => void;
+  onJump: (id: string) => void;
+}) {
+  if (missing.length === 0) {
+    return (
+      <div className="mt-6 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+        <Check className="h-4 w-4" /> All required sections are complete — you can generate the document.
+      </div>
+    );
+  }
+  return (
+    <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
+      <p className="text-sm font-medium text-amber-900">Finish these required sections before generating:</p>
+      <ul className="mt-2 flex flex-wrap gap-2">
+        {missing.map((m) => (
+          <li key={m.id}>
+            <button
+              onClick={() => onJump(m.id)}
+              className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100"
+            >
+              {m.navTitle} →
+            </button>
+          </li>
+        ))}
+      </ul>
+      <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs text-amber-900">
+        <input
+          type="checkbox"
+          checked={advancedMode}
+          onChange={(e) => setAdvancedMode(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span>
+          <span className="font-medium">Advanced mode</span> — generate now with what I have and let me edit the rest directly in the canvas.
+        </span>
+      </label>
+    </div>
+  );
+}
+
 /* ---------- Document canvas: auto-generate, live preview, then editable ---------- */
 
 const MD_COMPONENTS: any = {
@@ -205,11 +293,23 @@ const MD_COMPONENTS: any = {
   strong: ({ children }: any) => <strong className="font-semibold">{children}</strong>,
 };
 
-function DocumentCanvas({ answers, onBack }: { answers: Answers; onBack: () => void }) {
+function DocumentCanvas({
+  answers,
+  canGenerate,
+  missing,
+  onEnableAdvanced,
+  onBack,
+}: {
+  answers: Answers;
+  canGenerate: boolean;
+  missing: string[];
+  onEnableAdvanced: () => void;
+  onBack: () => void;
+}) {
   const editor = useCreateBlockNote({});
   const [md, setMd] = useState("");
   const [loading, setLoading] = useState(false);
-  const [ready, setReady] = useState(false); // editor populated -> show editable canvas
+  const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const startedRef = useRef(false);
@@ -252,7 +352,7 @@ function DocumentCanvas({ answers, onBack }: { answers: Answers; onBack: () => v
         acc += decoder.decode(value, { stream: true });
         setMd(acc);
       }
-      await loadIntoEditor(acc); // streaming done -> make it editable
+      await loadIntoEditor(acc);
     } catch (err) {
       if ((err as Error).name !== "AbortError") setError(err instanceof Error ? err.message : "Generation failed");
     } finally {
@@ -261,13 +361,15 @@ function DocumentCanvas({ answers, onBack }: { answers: Answers; onBack: () => v
     }
   }
 
+  // Auto-generate once we're allowed to (on mount if allowed, or when advanced mode unlocks it).
   useEffect(() => {
-    if (startedRef.current) return;
-    startedRef.current = true;
-    generate();
+    if (canGenerate && !startedRef.current) {
+      startedRef.current = true;
+      generate();
+    }
     return () => abortRef.current?.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [canGenerate]);
 
   async function currentMarkdown(): Promise<string> {
     if (ready) {
@@ -304,50 +406,68 @@ function DocumentCanvas({ answers, onBack }: { answers: Answers; onBack: () => v
         <Button variant="ghost" size="sm" onClick={onBack}>
           <ArrowLeft className="mr-1 h-4 w-4" /> Back to questions
         </Button>
-        <div className="flex items-center gap-2">
-          {ready ? <span className="mr-1 hidden text-xs text-neutral-400 sm:inline">Editable — click to edit</span> : null}
-          <Button variant="outline" size="sm" onClick={generate} disabled={loading}>
-            {loading ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-1 h-4 w-4" />}
-            {loading ? "Generating" : "Regenerate"}
-          </Button>
-          <Button variant="outline" size="sm" onClick={copy} disabled={!md.trim()}>
-            {copied ? <Check className="mr-1 h-4 w-4" /> : <Copy className="mr-1 h-4 w-4" />}
-            {copied ? "Copied" : "Copy"}
-          </Button>
-          <Button variant="outline" size="sm" onClick={download} disabled={!md.trim()}>
-            <Download className="mr-1 h-4 w-4" /> .md
-          </Button>
-        </div>
+        {canGenerate ? (
+          <div className="flex items-center gap-2">
+            {ready ? <span className="mr-1 hidden text-xs text-neutral-400 sm:inline">Editable — click to edit</span> : null}
+            <Button variant="outline" size="sm" onClick={generate} disabled={loading}>
+              {loading ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-1 h-4 w-4" />}
+              {loading ? "Generating" : "Regenerate"}
+            </Button>
+            <Button variant="outline" size="sm" onClick={copy} disabled={!md.trim()}>
+              {copied ? <Check className="mr-1 h-4 w-4" /> : <Copy className="mr-1 h-4 w-4" />}
+              {copied ? "Copied" : "Copy"}
+            </Button>
+            <Button variant="outline" size="sm" onClick={download} disabled={!md.trim()}>
+              <Download className="mr-1 h-4 w-4" /> .md
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       {/* Canvas */}
       <div className="flex-1 overflow-y-auto bg-neutral-100 px-4 py-8">
-        <div className="mx-auto w-full max-w-3xl rounded-xl border border-neutral-200 bg-white shadow-sm">
-          {error ? (
-            <div className="m-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {error}
+        {!canGenerate ? (
+          <div className="mx-auto mt-10 max-w-md rounded-xl border border-amber-200 bg-amber-50 p-6 text-center">
+            <Lock className="mx-auto h-6 w-6 text-amber-500" />
+            <p className="mt-3 text-sm font-medium text-amber-900">A few required sections aren&apos;t filled in yet</p>
+            <p className="mt-1 text-xs text-amber-800">Missing: {missing.join(", ")}</p>
+            <div className="mt-4 flex justify-center gap-2">
+              <Button variant="outline" size="sm" onClick={onBack}>
+                <ArrowLeft className="mr-1 h-4 w-4" /> Finish them
+              </Button>
+              <button
+                onClick={onEnableAdvanced}
+                className="inline-flex items-center rounded-md px-3 py-1.5 text-sm font-medium text-white"
+                style={{ backgroundColor: ACCENT }}
+              >
+                Generate anyway
+              </button>
             </div>
-          ) : null}
+          </div>
+        ) : (
+          <div className="mx-auto w-full max-w-5xl rounded-xl border border-neutral-200 bg-white shadow-sm">
+            {error ? (
+              <div className="m-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+            ) : null}
 
-          {ready ? (
-            // Editable rich-text canvas (BlockNote)
-            <div className="py-6">
-              <BlockNoteView editor={editor} theme="light" />
-            </div>
-          ) : !md && loading ? (
-            <div className="flex items-center gap-2 px-10 py-10 text-sm text-neutral-500">
-              <Loader2 className="h-4 w-4 animate-spin" /> Compiling your experiment design…
-            </div>
-          ) : (
-            // Live preview while streaming
-            <article className="px-10 py-10" style={{ fontFamily: 'Georgia, Cambria, "Times New Roman", serif' }}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
-                {md}
-              </ReactMarkdown>
-              {loading ? <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-neutral-400 align-middle" /> : null}
-            </article>
-          )}
-        </div>
+            {ready ? (
+              <div className="py-6">
+                <BlockNoteView editor={editor} theme="light" />
+              </div>
+            ) : !md && loading ? (
+              <div className="flex items-center gap-2 px-12 py-12 text-sm text-neutral-500">
+                <Loader2 className="h-4 w-4 animate-spin" /> Compiling your experiment design…
+              </div>
+            ) : (
+              <article className="px-12 py-12" style={{ fontFamily: 'Georgia, Cambria, "Times New Roman", serif' }}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+                  {md}
+                </ReactMarkdown>
+                {loading ? <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-neutral-400 align-middle" /> : null}
+              </article>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
