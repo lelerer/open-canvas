@@ -16,7 +16,7 @@ When the user describes an experiment they want to conduct, generate the study-d
 
 TEMPLATE (reproduce verbatim, filling the [specify] placeholders):
 
-# What experiment do you want to conduct?
+# Experiment Design
 
 # 1. Research Questions
 - RQ1: [specify]

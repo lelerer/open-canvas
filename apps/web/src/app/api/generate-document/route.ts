@@ -13,7 +13,7 @@ export const runtime = "nodejs";
 const MODEL = "claude-sonnet-4-6";
 const MAX_TOKENS = 4096;
 
-const TEMPLATE = `# What experiment do you want to conduct?
+const TEMPLATE = `# Experiment Design
 
 # 1. Research Questions
 *   RQ1: [specify]
