@@ -13,6 +13,8 @@ import {
   ArrowLeft,
   FileText,
   Lock,
+  Wand2,
+  CornerDownLeft,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -28,6 +30,7 @@ import { cn } from "@/lib/utils";
 import { QUESTIONS, Answers, buildTranscript } from "./questions";
 
 const STORAGE_KEY = "experiment-interview-v1";
+const DOC_KEY = "experiment-document-v1";
 const ACCENT = "#359793";
 const CANVAS_STEP = QUESTIONS.length; // last step index
 
@@ -312,20 +315,28 @@ function DocumentCanvas({
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [instruction, setInstruction] = useState("");
+  const [hasDoc, setHasDoc] = useState(false);
+  const [revising, setRevising] = useState(false);
   const startedRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+  const docRef = useRef(""); // always-current full markdown (belt-and-suspenders)
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Selection-based prompting: captured highlighted text + where to anchor the popover.
+  const [sel, setSel] = useState<{ text: string; top: number; left: number } | null>(null);
 
   async function loadIntoEditor(markdown: string) {
     try {
       const blocks = await editor.tryParseMarkdownToBlocks(markdown);
       editor.replaceBlocks(editor.document, blocks);
       setReady(true);
+      setHasDoc(true);
     } catch (e) {
       console.error("Failed to load markdown into editor:", e);
     }
   }
 
-  async function generate() {
+  async function runStream(url: string, body: unknown) {
     setLoading(true);
     setError(null);
     setReady(false);
@@ -333,10 +344,10 @@ function DocumentCanvas({
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      const res = await fetch("/api/generate-document", {
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ transcript: buildTranscript(answers) }),
+        body: JSON.stringify(body),
         signal: controller.signal,
       });
       if (!res.ok || !res.body) {
@@ -353,13 +364,151 @@ function DocumentCanvas({
         setMd(acc);
       }
       await loadIntoEditor(acc);
+      docRef.current = acc;
+      persistDoc(acc);
     } catch (err) {
-      if ((err as Error).name !== "AbortError") setError(err instanceof Error ? err.message : "Generation failed");
+      if ((err as Error).name !== "AbortError") setError(err instanceof Error ? err.message : "Request failed");
     } finally {
       setLoading(false);
       abortRef.current = null;
     }
   }
+
+  function generate() {
+    return runStream("/api/generate-document", { transcript: buildTranscript(answers) });
+  }
+
+  // Stream a request to completion and return the accumulated text,
+  // WITHOUT touching the canvas (used for targeted selection edits).
+  async function streamText(url: string, body: unknown): Promise<string> {
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!res.ok || !res.body) {
+      const data = await res.json().catch(() => null);
+      throw new Error(data?.error ?? `Request failed (${res.status})`);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let acc = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      acc += decoder.decode(value, { stream: true });
+    }
+    return acc;
+  }
+
+  // Replace `target` inside `doc` with `replacement`. Exact match first, then a
+  // whitespace-flexible regex (handles line wrapping between source and rendered text).
+  function spliceDoc(doc: string, target: string, replacement: string): string | null {
+    const idx = doc.indexOf(target);
+    if (idx >= 0) return doc.slice(0, idx) + replacement + doc.slice(idx + target.length);
+    const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+    try {
+      const re = new RegExp(escaped);
+      if (re.test(doc)) return doc.replace(re, () => replacement);
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+
+  function persistDoc(markdown: string) {
+    try {
+      localStorage.setItem(DOC_KEY, markdown);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // Selection edit: rewrite ONLY the highlighted passage, splice it back in place.
+  async function runRevise(instructionText: string, selectionText: string) {
+    const text = instructionText.trim();
+    if (!text || loading || revising || !selectionText.trim()) return;
+    let doc = "";
+    try {
+      doc = await currentMarkdown();
+    } catch {
+      /* ignore */
+    }
+    if (!doc || !doc.trim()) doc = docRef.current;
+    if (!doc || !doc.trim()) doc = md;
+    if (!doc || !doc.trim()) {
+      setError("No document to revise yet — generate one first.");
+      return;
+    }
+    setRevising(true);
+    setError(null);
+    try {
+      const replacement = (await streamText("/api/revise-document", {
+        document: doc,
+        instruction: text,
+        selection: selectionText,
+      })).trim();
+      const newDoc = spliceDoc(doc, selectionText, replacement);
+      if (newDoc == null) {
+        setError("Couldn't locate the highlighted text in the document — try selecting within a single paragraph or cell.");
+        return;
+      }
+      setMd(newDoc);
+      docRef.current = newDoc;
+      persistDoc(newDoc);
+      await loadIntoEditor(newDoc);
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") setError(err instanceof Error ? err.message : "Edit failed");
+    } finally {
+      setRevising(false);
+      setSel(null);
+      setInstruction("");
+      abortRef.current = null;
+    }
+  }
+
+  // Detect a text selection inside the canvas and anchor a prompt popover to it.
+  function handleSelection() {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed) {
+      setSel(null);
+      return;
+    }
+    const text = selection.toString().trim();
+    const container = scrollRef.current;
+    if (!text || text.length < 2 || !container) {
+      setSel(null);
+      return;
+    }
+    // Only react to selections that live inside the canvas.
+    const anchor = selection.anchorNode;
+    if (anchor && !container.contains(anchor)) {
+      setSel(null);
+      return;
+    }
+    const rect = selection.getRangeAt(0).getBoundingClientRect();
+    setSel({ text, top: rect.bottom + 6, left: rect.left });
+    setInstruction("");
+  }
+
+  // Restore a previously generated/edited document so it survives reloads & navigation.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(DOC_KEY);
+      if (saved && saved.trim()) {
+        startedRef.current = true;
+        setMd(saved);
+        docRef.current = saved;
+        loadIntoEditor(saved);
+      }
+    } catch {
+      /* ignore */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Auto-generate once we're allowed to (on mount if allowed, or when advanced mode unlocks it).
   useEffect(() => {
@@ -374,9 +523,10 @@ function DocumentCanvas({
   async function currentMarkdown(): Promise<string> {
     if (ready) {
       try {
-        return await editor.blocksToMarkdownLossy(editor.document);
+        const m = await editor.blocksToMarkdownLossy(editor.document);
+        if (m && m.trim()) return m;
       } catch {
-        return md;
+        /* fall through to md */
       }
     }
     return md;
@@ -424,8 +574,11 @@ function DocumentCanvas({
         ) : null}
       </div>
 
-      {/* Canvas */}
-      <div className="flex-1 overflow-y-auto bg-neutral-100 px-4 py-8">
+      <div
+        ref={scrollRef}
+        onMouseUp={handleSelection}
+        className="relative flex-1 overflow-y-auto bg-neutral-100 px-4 py-8"
+      >
         {!canGenerate ? (
           <div className="mx-auto mt-10 max-w-md rounded-xl border border-amber-200 bg-amber-50 p-6 text-center">
             <Lock className="mx-auto h-6 w-6 text-amber-500" />
@@ -452,7 +605,21 @@ function DocumentCanvas({
 
             {ready ? (
               <div className="py-6">
-                <BlockNoteView editor={editor} theme="light" />
+                <BlockNoteView
+                  editor={editor}
+                  theme="light"
+                  onChange={() => {
+                    editor
+                      .blocksToMarkdownLossy(editor.document)
+                      .then((m) => {
+                        if (m && m.trim()) {
+                          docRef.current = m;
+                          persistDoc(m);
+                        }
+                      })
+                      .catch(() => {});
+                  }}
+                />
               </div>
             ) : !md && loading ? (
               <div className="flex items-center gap-2 px-12 py-12 text-sm text-neutral-500">
@@ -469,6 +636,49 @@ function DocumentCanvas({
           </div>
         )}
       </div>
+
+      {/* Selection prompt popover */}
+      {sel && canGenerate && hasDoc && !loading ? (
+        <div
+          className="fixed z-50 w-80 rounded-xl border border-neutral-200 bg-white p-3 shadow-lg"
+          style={{ top: sel.top, left: sel.left }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-neutral-500">
+            <Wand2 className="h-3.5 w-3.5" style={{ color: ACCENT }} /> Edit selection
+          </div>
+          <p className="mb-2 rounded bg-neutral-50 px-2 py-1 text-xs italic text-neutral-500">
+            “{sel.text.length > 120 ? sel.text.slice(0, 120) + "…" : sel.text}”
+          </p>
+          <div className="flex items-center gap-1.5">
+            <input
+              autoFocus
+              value={instruction}
+              onChange={(e) => setInstruction(e.target.value)}
+              disabled={revising}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  runRevise(instruction, sel.text);
+                } else if (e.key === "Escape") {
+                  setSel(null);
+                }
+              }}
+              placeholder="How should I change this?"
+              className="flex-1 rounded-md border border-neutral-200 px-2.5 py-1.5 text-sm outline-none focus:border-neutral-400 disabled:opacity-50"
+            />
+            <button
+              onClick={() => runRevise(instruction, sel.text)}
+              disabled={revising || !instruction.trim()}
+              className="inline-flex items-center justify-center rounded-md px-2.5 py-1.5 text-white disabled:opacity-40"
+              style={{ backgroundColor: ACCENT }}
+              aria-label="Apply"
+            >
+              {revising ? <Loader2 className="h-4 w-4 animate-spin" /> : <CornerDownLeft className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

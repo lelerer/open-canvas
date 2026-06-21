@@ -13,7 +13,7 @@ export const runtime = "nodejs";
 const MODEL = "claude-sonnet-4-6";
 const MAX_TOKENS = 4096;
 
-const TEMPLATE = `# Experiment Design
+const TEMPLATE = `# <A concise, descriptive title for the study>
 
 # 1. Research Questions
 *   RQ1: [specify]
@@ -58,7 +58,7 @@ const TEMPLATE = `# Experiment Design
 ## 7.2 Agent
 [the AI model/agent that learns from the training data and produces the predictions participants evaluate]`;
 
-const SYSTEM_PROMPT = `You are an expert HCI and experimental-methodology assistant. A researcher has answered an input about a planned user study. Turn their answers into a complete, rigorous experiment-design document.
+const SYSTEM_PROMPT = `You are an expert HCI and experimental-methodology assistant. A researcher has answered an interview about a planned user study. Turn their answers into a complete, rigorous experiment-design document.
 
 Produce the document following EXACTLY this template — same section order, same headers, same markdown tables:
 
@@ -70,6 +70,7 @@ Rules:
 - Do NOT invent concrete specifics the researcher did not give (participant N, durations, number of levels, level names, scales, etc.). Where something is missing, simply leave it out or phrase the section around what is known — write naturally and do NOT insert placeholder text such as "[to specify]", "[specify]", "TBD", "N/A", or empty bracketed prompts. If a whole table row or sub-section has no information, omit that row/sub-section rather than emitting a blank or placeholder one.
 - Briefly sanity-check internal consistency. If the design type, variables, and counterbalancing conflict (e.g. a within-subject design with no counterbalancing, or an IV whose #lvls does not match its listed levels), add a concise inline note on its own line starting with "> ⚠ Note:".
 - The bracketed placeholders shown in the template above (e.g. "[specify]", "[within-subject / ...]") are illustrative of structure ONLY. Never copy them into your output — replace each with real content from the answers, or omit it.
+- The first H1 must be a concise, descriptive title for the study, derived from the researcher's overview/answers — e.g. "# Comparing LIME and SHAP Explanations on User Trust Calibration". NEVER output the literal prompt "What experiment do you want to conduct?" as the title.
 - Output ONLY the final markdown document. No preamble, no closing remarks, no code fences.`;
 
 export async function POST(req: NextRequest) {
@@ -119,7 +120,7 @@ export async function POST(req: NextRequest) {
           {
             role: "user",
             content:
-              "Here is my input. Compile it into the final document, following the rules.\n\n" +
+              "Here is my interview transcript. Compile it into the final document, following the rules.\n\n" +
               transcript,
           },
         ],
