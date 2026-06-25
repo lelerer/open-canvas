@@ -261,10 +261,10 @@ export function buildTranscript(a: Answers): string {
     `Counterbalancing: ${v("sd_balancing") || "(none)"}`,
     `Participants (total N): ${v("sd_participants") || "(none)"}`,
   ].join("\n");
-  blocks.push(`Study Design, Variables & Participants\n${sd}`);
+  blocks.push(`Study Design\n${sd}`);
 
   const ds = [
-    `Agent under evaluation: ${v("ds_agent") || "(none)"}`,
+    `Agent for evaluation: ${v("ds_agent") || "(none)"}`,
     `Dataset / trial configuration: ${v("ds_dataset") || "(none)"}`,
   ].join("\n");
   blocks.push(`Dataset & Agent\n${ds}`);
