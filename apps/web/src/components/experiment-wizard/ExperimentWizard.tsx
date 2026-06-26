@@ -180,7 +180,7 @@ function DocumentView({ answers }: { answers: Answers }) {
         </Section>
 
         <Section id="dataset" title="Dataset & Agent" done={isPageComplete(pageById("dataset"), a)}>
-          <Row label="Agent under evaluation" value={a.ds_agent} />
+          <Row label="Agent for evaluation" value={a.ds_agent} />
           <Row label="Dataset / trial config" value={a.ds_dataset} />
         </Section>
       </div>
