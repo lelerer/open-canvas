@@ -444,7 +444,7 @@ function DatasetBody({ answers, setAnswer }: { answers: Answers; setAnswer: (id:
       </Field>
 
       <Field label="Dataset / trial configuration" hint="Practice / baseline / main blocks, trials per block, analysed trials per participant.">
-        <Textarea value={a.ds_dataset ?? ""} onChange={(e) => setAnswer("ds_dataset", e.target.value)} placeholder="e.g. 5 practice + 40 main trials, 2 blocks, dataset = German Credit, 20 analysed trials per participant" className="min-h-[120px] resize-y bg-white text-sm" />
+        <Textarea value={a.ds_dataset ?? ""} onChange={(e) => setAnswer("ds_dataset", e.target.value)} placeholder="e.g. 5 practice + 40 main trials, 2 blocks, dataset = Wine Quality, 20 analysed trials per participant" className="min-h-[120px] resize-y bg-white text-sm" />
       </Field>
     </>
   );
