@@ -145,13 +145,60 @@ export function ivLevelsFor(f: IvFactor, agent: string): string[] {
   return f.levels ?? [];
 }
 
+// ---- Multiple IVs (factorial), each with its own within/between allocation ----
+export const ALLOC_OPTIONS = ["Within-subjects", "Between-subjects"] as const;
+
+export interface IvEntry {
+  factor: string; // factor id from IV_CATALOG
+  label: string;
+  levels: string; // "A | B" (categorical), "A vs B" (binary), or "min–max" (range/cognitive)
+  cogParam?: string;
+  min?: string;
+  max?: string;
+  alloc: string; // "Within-subjects" | "Between-subjects"
+}
+
+export function parseIvs(a: Answers): IvEntry[] {
+  try {
+    const arr = JSON.parse(a.sd_ivs || "[]");
+    return Array.isArray(arr) ? (arr as IvEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+// Number of levels (cells contributed) for one IV.
+export function ivCellCount(e: IvEntry): number {
+  const lv = (e.levels || "").trim();
+  if (!lv) return 1;
+  if (lv.includes(" vs ")) return 2;
+  if (lv.includes(" | ")) return lv.split(" | ").filter(Boolean).length || 1;
+  return 1; // range / cognitive / single value
+}
+
+export function totalCells(ivs: IvEntry[]): number {
+  return ivs.reduce((n, e) => n * Math.max(1, ivCellCount(e)), 1);
+}
+
+// Participants are split only across the between-subjects cells.
+export function betweenCells(ivs: IvEntry[]): number {
+  return ivs.filter((e) => e.alloc === "Between-subjects").reduce((n, e) => n * Math.max(1, ivCellCount(e)), 1);
+}
+
+export function designDescriptor(ivs: IvEntry[]): string {
+  if (!ivs.length) return "";
+  const allocs = new Set(ivs.map((e) => e.alloc));
+  if (allocs.size > 1) return "mixed";
+  return allocs.has("Between-subjects") ? "between-subjects" : "within-subjects";
+}
+
 export const PAGES: Page[] = [
   {
     id: "overview",
     navTitle: "Overview",
     section: "Getting started",
     kind: "text",
-    prompt: "What are you hoping to test or explore?",
+    prompt: "What experiment do you want to test on?",
     placeholder: "e.g. I want to compare two XAI explanation styles and see how each affects users' trust calibration…",
     required: true,
   },
@@ -192,7 +239,9 @@ export function isPageComplete(page: Page, a: Answers): boolean {
   const has = (k: string) => (a[k] || "").trim().length > 0;
   if (page.kind === "text") return has(page.id);
   if (page.kind === "studydesign") {
-    return has("sd_dv") && has("sd_iv") && has("sd_iv_levels") && has("sd_cv") && has("sd_balancing") && has("sd_participants");
+    const ivs = parseIvs(a);
+    const ivOk = ivs.length > 0 && ivs.every((e) => e.factor && (e.levels || "").trim());
+    return has("sd_dv") && ivOk && has("sd_cv") && has("sd_participants");
   }
   if (page.kind === "dataset") return has("ds_agent");
   return true; // review or unknown
@@ -202,42 +251,39 @@ export function isPageComplete(page: Page, a: Answers): boolean {
 export function validateParticipants(
   a: Answers
 ): { level: "ok" | "warn" | "info"; message: string } | null {
-  const design = a.sd_design;
-  const balancing = a.sd_balancing;
-  const conditions = parseInt(a.sd_conditions || "", 10);
+  const ivs = parseIvs(a);
   const n = parseInt(a.sd_participants || "", 10);
-  if (!design || !a.sd_participants) return null;
+  if (!ivs.length || !a.sd_participants) return null;
   if (!Number.isFinite(n) || n <= 0) return { level: "warn", message: "Enter the total number of participants as a number." };
 
-  const c = Number.isFinite(conditions) && conditions > 1 ? conditions : null;
+  const cells = totalCells(ivs);
+  const between = betweenCells(ivs);
+  const hasWithin = ivs.some((e) => e.alloc === "Within-subjects");
+  const balancing = a.sd_balancing;
 
-  if (design === "Between-subjects") {
-    if (!c) return { level: "info", message: `Between-subjects: each participant sees one condition. Add the number of conditions to check group sizes.` };
-    if (n < c) return { level: "warn", message: `Between-subjects with ${c} conditions needs at least ${c} participants (one per group) — ${n} is too few.` };
-    if (n % c !== 0) return { level: "warn", message: `${n} participants don't divide evenly into ${c} conditions → unequal groups. Nearest even split: ${Math.floor(n / c) * c} or ${Math.ceil(n / c) * c}.` };
-    return { level: "ok", message: `Between-subjects: ${n} ÷ ${c} = ${n / c} participants per condition. ✓` };
+  // Participants are divided across between-subjects cells only.
+  if (between > 1) {
+    if (n < between) return { level: "warn", message: `${between} between-subjects cell(s) need at least ${between} participants (one per group) — ${n} is too few.` };
+    if (n % between !== 0) return { level: "warn", message: `${n} doesn't divide evenly into ${between} between-subjects cell(s) → unequal groups. Nearest: ${Math.floor(n / between) * between} or ${Math.ceil(n / between) * between}.` };
+    const per = n / between;
+    return { level: "ok", message: `${n} participants ÷ ${between} between-subjects cell(s) = ${per} each${hasWithin ? `, each seeing all within-subjects levels (design has ${cells} cell(s) total).` : ` (design has ${cells} cell(s) total).`} ✓` };
   }
 
-  if (design === "Within-subjects") {
-    if (!c) return { level: "info", message: `Within-subjects: everyone sees all conditions. Add the number of conditions to check counterbalancing.` };
-    if (balancing === "Full counterbalancing") {
-      const orders = factorial(c);
-      if (n % orders !== 0)
-        return { level: "warn", message: `Full counterbalancing of ${c} conditions = ${orders} orders. For balance, N should be a multiple of ${orders} (you have ${n}). Nearest: ${Math.floor(n / orders) * orders || orders} or ${Math.ceil(n / orders) * orders}.` };
+  // Fully within-subjects (or a single factor): everyone sees all cells.
+  if (hasWithin) {
+    if (balancing === "Full counterbalancing" && cells > 1) {
+      const orders = factorial(cells);
+      if (n % orders !== 0) return { level: "warn", message: `Full counterbalancing of ${cells} within-subjects cell(s) = ${orders} orders. For balance, N should be a multiple of ${orders} (you have ${n}).` };
       return { level: "ok", message: `Within-subjects, full counterbalancing: ${n} ÷ ${orders} orders = ${n / orders} per order. ✓` };
     }
-    if (balancing === "Latin square") {
-      if (n % c !== 0)
-        return { level: "warn", message: `A Latin square for ${c} conditions has ${c} sequences. For balance, N should be a multiple of ${c} (you have ${n}).` };
-      return { level: "ok", message: `Within-subjects, Latin square: ${n} ÷ ${c} sequences = ${n / c} per sequence. ✓` };
+    if (balancing === "Latin square" && cells > 1) {
+      if (n % cells !== 0) return { level: "warn", message: `A Latin square for ${cells} cell(s) has ${cells} sequences. For balance, N should be a multiple of ${cells} (you have ${n}).` };
+      return { level: "ok", message: `Within-subjects, Latin square: ${n} ÷ ${cells} sequences = ${n / cells} per sequence. ✓` };
     }
-    return { level: "info", message: `Within-subjects with ${c} conditions and "${balancing || "no"}" balancing — order effects may confound results; consider Latin square or full counterbalancing.` };
+    return { level: "ok", message: `Within-subjects: each of ${n} participants sees all ${cells} cell(s).${cells > 1 && !balancing ? " Consider counterbalancing to control order effects." : " ✓"}` };
   }
 
-  // Mixed
-  if (!c) return { level: "info", message: `Mixed design: add the number of conditions/cells to check participant allocation.` };
-  if (n % c !== 0) return { level: "info", message: `Mixed design with ${c} cells: ${n} participants won't split evenly across the between-subjects factor.` };
-  return { level: "ok", message: `Mixed design: ${n} participants across ${c} cells. ✓` };
+  return { level: "ok", message: `${n} participants across ${cells} cell(s). ✓` };
 }
 
 function factorial(k: number): number {

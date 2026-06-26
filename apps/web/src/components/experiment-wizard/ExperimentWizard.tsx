@@ -11,6 +11,8 @@ import {
   Send,
   Wand2,
   Download,
+  X,
+  Plus,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -24,13 +26,18 @@ import {
   isPageComplete,
   validateParticipants,
   AGENT_OPTIONS,
-  DESIGN_TYPES,
   BALANCING_METHODS,
   IV_AGENTS,
   IV_CATALOG,
   IvFactor,
   ivFactorsForAgent,
   ivLevelsFor,
+  ALLOC_OPTIONS,
+  IvEntry,
+  parseIvs,
+  totalCells,
+  betweenCells,
+  designDescriptor,
 } from "./questions";
 
 const STORAGE_KEY = "experiment-interview-v1";
@@ -248,6 +255,9 @@ function DocSelect({ value, onChange, options, placeholder }: { value: string; o
 
 function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
   const a = answers;
+  const ivs = parseIvs(a);
+  const cells = totalCells(ivs);
+  const design = designDescriptor(ivs);
   const check = validateParticipants(a);
   const checkColor =
     check?.level === "ok" ? "text-emerald-700"
@@ -268,7 +278,7 @@ function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setAnswer: 
         </div>
 
         <div>
-          <DocLabel>We manipulate · independent variable</DocLabel>
+          <DocLabel>We manipulate · independent variable(s)</DocLabel>
           <IvBuilder answers={answers} setAnswer={setAnswer} />
         </div>
 
@@ -280,14 +290,13 @@ function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setAnswer: 
         <div className="border-t border-neutral-100 pt-6">
           <DocLabel>Structure</DocLabel>
           <p className="mt-1 text-[15px] leading-8 text-neutral-800">
-            This is a{" "}
-            <span className="inline-block align-baseline">
-              <DocSelect value={a.sd_design ?? ""} onChange={(v) => setAnswer("sd_design", v)} options={DESIGN_TYPES} placeholder="design type" />
-            </span>{" "}
-            study with{" "}
-            <span className="inline-block align-baseline">
+            This is a <span className="font-medium">{design || "—"}</span> design with{" "}
+            <span className="inline-block align-baseline" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
               <DocSelect value={a.sd_balancing ?? ""} onChange={(v) => setAnswer("sd_balancing", v)} options={BALANCING_METHODS} placeholder="counterbalancing" />
             </span>.
+          </p>
+          <p className="mt-1 text-xs text-neutral-400" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+            Within/between is set per independent variable above; “{design || "—"}” is derived from those choices.
           </p>
         </div>
 
@@ -300,17 +309,9 @@ function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setAnswer: 
               value={a.sd_participants ?? ""}
               onChange={(e) => setAnswer("sd_participants", e.target.value)}
               placeholder="N"
-              className="w-16 border-0 border-b border-neutral-200 bg-transparent px-0 py-0.5 text-center text-[15px] text-neutral-900 outline-none placeholder:text-neutral-300 focus:border-neutral-400"
+              className="w-16 border-0 border-b border-neutral-200 bg-transparent px-0 py-0.5 text-center text-[15px] text-neutral-900 outline-none placeholder:text-neutral-400 focus:border-neutral-500"
             />{" "}
-            participants across{" "}
-            <input
-              type="number"
-              value={a.sd_conditions ?? ""}
-              onChange={(e) => setAnswer("sd_conditions", e.target.value)}
-              placeholder="?"
-              className="w-12 border-0 border-b border-neutral-200 bg-transparent px-0 py-0.5 text-center text-[15px] text-neutral-900 outline-none placeholder:text-neutral-300 focus:border-neutral-400"
-            />{" "}
-            conditions.
+            participants across <span className="font-medium">{cells}</span> condition{cells === 1 ? "" : "s"}.
           </p>
           {check ? <p className={cn("mt-2 text-sm", checkColor)} style={{ fontFamily: "ui-sans-serif, system-ui" }}>{check.message}</p> : null}
         </div>
@@ -319,115 +320,196 @@ function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setAnswer: 
   );
 }
 
-function IvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
-  const a = answers;
-  const agent = a.sd_iv_agent || a.ds_agent || "CoAX";
-  const factors = ivFactorsForAgent(agent);
-  const factor: IvFactor | null = IV_CATALOG.find((f) => f.id === a.sd_iv_factor) || null;
-  const levels = (a.sd_iv_levels || "").split(" | ").map((s) => s.trim()).filter(Boolean);
+function AllocToggle({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="inline-flex overflow-hidden rounded-md border border-neutral-200" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+      {ALLOC_OPTIONS.map((opt) => {
+        const on = value === opt;
+        return (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => onChange(opt)}
+            className={cn("px-2.5 py-1 text-xs font-medium transition-colors", on ? "text-white" : "bg-white text-neutral-500 hover:bg-neutral-50")}
+            style={on ? { backgroundColor: ACCENT } : undefined}
+          >
+            {opt === "Within-subjects" ? "Within" : "Between"}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
-  function setAgent(v: string) {
-    setAnswer("sd_iv_agent", v); setAnswer("sd_iv_factor", ""); setAnswer("sd_iv", ""); setAnswer("sd_iv_levels", ""); setAnswer("sd_cog_param", "");
-  }
-  function setFactor(id: string) {
-    const f = IV_CATALOG.find((x) => x.id === id) || null;
-    setAnswer("sd_iv_factor", id); setAnswer("sd_iv", f ? f.label : ""); setAnswer("sd_iv_levels", ""); setAnswer("sd_cog_param", "");
-    if (f?.kind === "binary" && f.binary) { setAnswer("sd_iv_levels", `${f.binary[0]} vs ${f.binary[1]}`); setAnswer("sd_conditions", "2"); }
-  }
-  function toggleLevel(level: string) {
+function IvLevelEditor({ entry, agent, onPatch }: { entry: IvEntry; agent: string; onPatch: (patch: Partial<IvEntry>) => void }) {
+  const factor: IvFactor | null = IV_CATALOG.find((f) => f.id === entry.factor) || null;
+  if (!factor) return null;
+  const levels = (entry.levels || "").split(" | ").map((s) => s.trim()).filter(Boolean);
+  const numCls = "w-20 border-0 border-b border-neutral-200 bg-transparent px-0 py-0.5 text-center text-[15px] outline-none placeholder:text-neutral-400 focus:border-neutral-500";
+
+  function toggleLevel(lvl: string) {
     const set = new Set(levels);
-    if (set.has(level)) set.delete(level); else set.add(level);
-    const arr = [...set];
-    setAnswer("sd_iv_levels", arr.join(" | ")); setAnswer("sd_conditions", String(arr.length));
+    if (set.has(lvl)) set.delete(lvl); else set.add(lvl);
+    onPatch({ levels: [...set].join(" | ") });
   }
   function setRange(min: string, max: string) {
-    setAnswer("sd_iv_min", min); setAnswer("sd_iv_max", max);
-    setAnswer("sd_iv_levels", min || max ? `${min || "?"}–${max || "?"}` : "");
+    onPatch({ min, max, levels: min || max ? `${min || "?"}\u2013${max || "?"}` : "" });
   }
 
-  const cogParams = factor?.kind === "cognitive" && factor.cognitiveByAgent ? factor.cognitiveByAgent[agent] ?? [] : [];
-  const cogParam = cogParams.find((p) => p.name === a.sd_cog_param) || null;
-  const numCls = "w-20 border-0 border-b border-neutral-200 bg-transparent px-0 py-0.5 text-center text-[15px] outline-none placeholder:text-neutral-300 focus:border-neutral-400";
+  const cogParams = factor.kind === "cognitive" && factor.cognitiveByAgent ? factor.cognitiveByAgent[agent] ?? [] : [];
+  const cogParam = cogParams.find((p) => p.name === entry.cogParam) || null;
 
   return (
-    <div>
-      <p className="mt-1 text-[15px] leading-8 text-neutral-800" style={{ fontFamily: SERIF }}>
-        Using{" "}
-        <span className="inline-block align-baseline" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
-          <DocSelect value={agent} onChange={setAgent} options={IV_AGENTS} placeholder="model" />
-        </span>
-        , we vary{" "}
-        <span className="inline-block align-baseline" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
-          <select
-            value={a.sd_iv_factor ?? ""}
-            onChange={(e) => setFactor(e.target.value)}
-            className={cn("max-w-[16rem] truncate border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] leading-7 outline-none focus:border-neutral-500", a.sd_iv_factor ? "text-neutral-900" : "text-neutral-400")}
-          >
-            <option value="">a factor</option>
-            {factors.map((f) => (<option key={f.id} value={f.id} className="text-neutral-900">{f.label}</option>))}
-          </select>
-        </span>.
-      </p>
+    <div className="mt-2" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+      {factor.note ? <p className="mb-2 text-xs text-neutral-400">{factor.note}</p> : null}
 
-      {factor ? (
-        <div className="mt-2 pl-4" style={{ fontFamily: "ui-sans-serif, system-ui", borderLeft: `2px solid #e5e7eb` }}>
-          {factor.note ? <p className="mb-2 text-xs text-neutral-400">{factor.note}</p> : null}
+      {factor.kind === "categorical" ? (
+        <div className="flex flex-wrap gap-2">
+          {ivLevelsFor(factor, agent).map((lvl) => {
+            const on = levels.includes(lvl);
+            return (
+              <button key={lvl} type="button" onClick={() => toggleLevel(lvl)} className={cn("rounded-full border px-3 py-1 text-xs font-medium transition-colors", on ? "border-transparent text-white" : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-100")} style={on ? { backgroundColor: ACCENT } : undefined}>
+                {lvl}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
 
-          {factor.kind === "categorical" ? (
-            <div className="flex flex-wrap gap-2">
-              {ivLevelsFor(factor, agent).map((lvl) => {
-                const on = levels.includes(lvl);
-                return (
-                  <button key={lvl} type="button" onClick={() => toggleLevel(lvl)} className={cn("rounded-full border px-3 py-1 text-xs font-medium transition-colors", on ? "border-transparent text-white" : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-100")} style={on ? { backgroundColor: ACCENT } : undefined}>
-                    {lvl}
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
+      {factor.kind === "binary" && factor.binary ? (
+        <p className="text-sm text-neutral-600">Comparing <span className="font-medium text-neutral-800">{factor.binary[0]}</span> vs <span className="font-medium text-neutral-800">{factor.binary[1]}</span> (2 conditions).</p>
+      ) : null}
 
-          {factor.kind === "binary" && factor.binary ? (
-            <p className="text-sm text-neutral-600">Comparing <span className="font-medium text-neutral-800">{factor.binary[0]}</span> vs <span className="font-medium text-neutral-800">{factor.binary[1]}</span> (2 conditions).</p>
-          ) : null}
+      {factor.kind === "range" && factor.range ? (
+        <p className="text-sm text-neutral-600">
+          From <input type="number" value={entry.min ?? ""} onChange={(e) => setRange(e.target.value, entry.max ?? "")} placeholder={String(factor.range.min)} className={numCls} /> to{" "}
+          <input type="number" value={entry.max ?? ""} onChange={(e) => setRange(entry.min ?? "", e.target.value)} placeholder={String(factor.range.max)} className={numCls} />{" "}
+          <span className="text-neutral-400">(allowed {factor.range.min}\u2013{factor.range.max})</span>
+        </p>
+      ) : null}
 
-          {factor.kind === "range" && factor.range ? (
-            <p className="text-sm text-neutral-600">
-              From{" "}
-              <input type="number" value={a.sd_iv_min ?? ""} onChange={(e) => setRange(e.target.value, a.sd_iv_max ?? "")} placeholder={String(factor.range.min)} className={numCls} />{" "}
-              to{" "}
-              <input type="number" value={a.sd_iv_max ?? ""} onChange={(e) => setRange(a.sd_iv_min ?? "", e.target.value)} placeholder={String(factor.range.max)} className={numCls} />{" "}
-              <span className="text-neutral-400">(allowed {factor.range.min}–{factor.range.max})</span>
-            </p>
-          ) : null}
-
-          {factor.kind === "cognitive" ? (
-            <div className="space-y-2">
-              <DocSelect
-                value={a.sd_cog_param ?? ""}
-                onChange={(v) => { setAnswer("sd_cog_param", v); setAnswer("sd_iv", v ? `Cognitive: ${v}` : "Cognitive parameters"); setAnswer("sd_iv_levels", ""); }}
-                options={cogParams.map((p) => p.name)}
-                placeholder="choose a parameter"
-              />
-              {cogParam ? (
-                <div className="text-sm text-neutral-600">
-                  {cogParam.note ? <p className="mb-1 text-xs text-neutral-400">{cogParam.note}</p> : null}
-                  {cogParam.min < cogParam.max ? (
-                    <p>
-                      From{" "}
-                      <input type="number" value={a.sd_iv_min ?? ""} onChange={(e) => setRange(e.target.value, a.sd_iv_max ?? "")} placeholder={String(cogParam.min)} className={numCls} />{" "}
-                      to{" "}
-                      <input type="number" value={a.sd_iv_max ?? ""} onChange={(e) => setRange(a.sd_iv_min ?? "", e.target.value)} placeholder={String(cogParam.max)} className={numCls} />{" "}
-                      <span className="text-neutral-400">(allowed {cogParam.min} to {cogParam.max})</span>
-                    </p>
-                  ) : (
-                    <input value={a.sd_iv_levels ?? ""} onChange={(e) => setAnswer("sd_iv_levels", e.target.value)} placeholder="e.g. top-2 features vs all features" className="w-full border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none placeholder:text-neutral-300 focus:border-neutral-400" />
-                  )}
-                </div>
-              ) : null}
+      {factor.kind === "cognitive" ? (
+        <div className="space-y-2">
+          <DocSelect
+            value={entry.cogParam ?? ""}
+            onChange={(v) => onPatch({ cogParam: v, label: v ? `Cognitive: ${v}` : "Cognitive parameters", levels: "" })}
+            options={cogParams.map((p) => p.name)}
+            placeholder="choose a parameter"
+          />
+          {cogParam ? (
+            <div className="text-sm text-neutral-600">
+              {cogParam.note ? <p className="mb-1 text-xs text-neutral-400">{cogParam.note}</p> : null}
+              {cogParam.min < cogParam.max ? (
+                <p>
+                  From <input type="number" value={entry.min ?? ""} onChange={(e) => setRange(e.target.value, entry.max ?? "")} placeholder={String(cogParam.min)} className={numCls} /> to{" "}
+                  <input type="number" value={entry.max ?? ""} onChange={(e) => setRange(entry.min ?? "", e.target.value)} placeholder={String(cogParam.max)} className={numCls} />{" "}
+                  <span className="text-neutral-400">(allowed {cogParam.min} to {cogParam.max})</span>
+                </p>
+              ) : (
+                <input value={entry.levels ?? ""} onChange={(e) => onPatch({ levels: e.target.value })} placeholder="e.g. top-2 features vs all features" className="w-full border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none placeholder:text-neutral-400 focus:border-neutral-500" />
+              )}
             </div>
           ) : null}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function IvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
+  const a = answers;
+  const agent = a.sd_iv_agent || a.ds_agent || "CoAX";
+  const ivs = parseIvs(a);
+  const factors = ivFactorsForAgent(agent);
+
+  // One-time migration from the old single-IV fields.
+  useEffect(() => {
+    if (!a.sd_ivs && a.sd_iv_factor) {
+      const migrated: IvEntry[] = [{
+        factor: a.sd_iv_factor,
+        label: a.sd_iv || "",
+        levels: a.sd_iv_levels || "",
+        cogParam: a.sd_cog_param || "",
+        min: a.sd_iv_min || "",
+        max: a.sd_iv_max || "",
+        alloc: a.sd_design || "Within-subjects",
+      }];
+      setAnswer("sd_ivs", JSON.stringify(migrated));
+      setAnswer("sd_conditions", String(totalCells(migrated)));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function save(next: IvEntry[]) {
+    setAnswer("sd_ivs", JSON.stringify(next));
+    setAnswer("sd_conditions", String(totalCells(next)));
+  }
+  function setAgent(v: string) {
+    setAnswer("sd_iv_agent", v);
+    // factor availability changes with the model; clear factors that no longer exist
+    const valid = new Set(ivFactorsForAgent(v).map((f) => f.id));
+    save(ivs.map((e) => (valid.has(e.factor) ? e : { ...e, factor: "", label: "", levels: "", cogParam: "", min: "", max: "" })));
+  }
+  function addIv() {
+    save([...ivs, { factor: "", label: "", levels: "", alloc: "Within-subjects" }]);
+  }
+  function removeIv(i: number) {
+    save(ivs.filter((_, idx) => idx !== i));
+  }
+  function patch(i: number, p: Partial<IvEntry>) {
+    save(ivs.map((e, idx) => (idx === i ? { ...e, ...p } : e)));
+  }
+  function setFactor(i: number, id: string) {
+    const f = IV_CATALOG.find((x) => x.id === id) || null;
+    const p: Partial<IvEntry> = { factor: id, label: f ? f.label : "", levels: "", cogParam: "", min: "", max: "" };
+    if (f?.kind === "binary" && f.binary) p.levels = `${f.binary[0]} vs ${f.binary[1]}`;
+    patch(i, p);
+  }
+
+  return (
+    <div style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+      {/* <p className="mt-1 text-[15px] leading-8 text-neutral-800" style={{ fontFamily: SERIF }}>
+        Using{" "}
+        <span className="inline-block align-baseline" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+          <DocSelect value={agent} onChange={setAgent} options={IV_AGENTS} placeholder="model" />
+        </span>
+        , we manipulate:
+      </p> */}
+
+      <div className="mt-2 space-y-3">
+        {ivs.length === 0 ? (
+          <p className="text-sm text-neutral-400">No independent variables yet — add one below.</p>
+        ) : null}
+
+        {ivs.map((entry, i) => (
+          <div key={i} className="rounded-lg border border-neutral-200 bg-white p-3">
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-semibold text-neutral-400">IV {i + 1}</span>
+              <select
+                value={entry.factor}
+                onChange={(e) => setFactor(i, e.target.value)}
+                className={cn("max-w-[16rem] flex-1 truncate border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none focus:border-neutral-500", entry.factor ? "text-neutral-900" : "text-neutral-400")}
+              >
+                <option value="">a factor</option>
+                {factors.map((f) => (<option key={f.id} value={f.id} className="text-neutral-900">{f.label}</option>))}
+              </select>
+              <AllocToggle value={entry.alloc} onChange={(v) => patch(i, { alloc: v })} />
+              <button type="button" onClick={() => removeIv(i)} className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600" aria-label="Remove IV">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <IvLevelEditor entry={entry} agent={agent} onPatch={(p) => patch(i, p)} />
+          </div>
+        ))}
+
+        <button
+          type="button"
+          onClick={addIv}
+          className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:bg-neutral-50"
+        >
+          <Plus className="h-4 w-4" /> Add independent variable
+        </button>
+      </div>
     </div>
   );
 }
@@ -444,7 +526,7 @@ function DatasetBody({ answers, setAnswer }: { answers: Answers; setAnswer: (id:
       </Field>
 
       <Field label="Dataset / trial configuration" hint="Practice / baseline / main blocks, trials per block, analysed trials per participant.">
-        <Textarea value={a.ds_dataset ?? ""} onChange={(e) => setAnswer("ds_dataset", e.target.value)} placeholder="e.g. 5 practice + 40 main trials, 2 blocks, dataset = Wine Quality, 20 analysed trials per participant" className="min-h-[120px] resize-y bg-white text-sm" />
+        <Textarea value={a.ds_dataset ?? ""} onChange={(e) => setAnswer("ds_dataset", e.target.value)} placeholder="e.g. 5 practice + 40 main trials, 2 blocks, dataset = German Credit, 20 analysed trials per participant" className="min-h-[120px] resize-y bg-white text-sm" />
       </Field>
     </>
   );
@@ -452,24 +534,33 @@ function DatasetBody({ answers, setAnswer }: { answers: Answers; setAnswer: (id:
 
 /* ----------------------------- Review & export ----------------------------- */
 
-function ivLabel(a: Answers) {
-  return [a.sd_iv, a.sd_iv_agent ? `(${a.sd_iv_agent})` : ""].filter(Boolean).join(" ");
+function ivSummaryLines(a: Answers): string[] {
+  const ivs = parseIvs(a);
+  if (!ivs.length) return [];
+  return ivs.map((e, i) => {
+    const allocShort = e.alloc === "Between-subjects" ? "between" : "within";
+    return `IV ${i + 1}: ${e.label || "(factor not set)"} — ${e.levels || "(no levels)"} [${allocShort}-subjects]`;
+  });
 }
 
 function buildExportText(a: Answers): string {
   const v = (k: string) => (a[k] || "").trim() || "(not provided)";
+  const ivs = parseIvs(a);
+  const ivLines = ivs.length ? ivSummaryLines(a) : ["(none provided)"];
   return [
     "EXPERIMENT DESIGN", "=================", "",
     "OVERVIEW", v("overview"), "",
     "RESEARCH QUESTIONS", v("rq"), "",
     "STUDY DESIGN, VARIABLES & PARTICIPANTS",
     `Dependent variable(s): ${v("sd_dv")}`,
-    `Independent variable: ${ivLabel(a) || "(not provided)"}`,
-    `IV levels / range: ${v("sd_iv_levels")}`,
+    `Model / framework: ${v("sd_iv_agent")}`,
+    "Independent variables:",
+    ...ivLines.map((l) => `  - ${l}`),
     `Control variables: ${v("sd_cv")}`,
-    `Design type: ${v("sd_design")}`,
+    `Design: ${designDescriptor(ivs) || "(not provided)"}`,
     `Counterbalancing: ${v("sd_balancing")}`,
-    `Number of conditions / cells: ${v("sd_conditions")}`,
+    `Total conditions / cells: ${ivs.length ? totalCells(ivs) : "(n/a)"}`,
+    `Between-subjects cells: ${ivs.length ? betweenCells(ivs) : "(n/a)"}`,
     `Participants (total N): ${v("sd_participants")}`, "",
     "DATASET & AGENT",
     `Agent under evaluation: ${v("ds_agent")}`,
@@ -479,16 +570,23 @@ function buildExportText(a: Answers): string {
 
 function buildExportJson(a: Answers): string {
   const t = (k: string) => (a[k] || "").trim();
+  const ivs = parseIvs(a);
   const obj = {
     overview: t("overview"),
     researchQuestions: t("rq"),
     studyDesign: {
       dependentVariables: t("sd_dv"),
-      independentVariable: { factor: t("sd_iv"), modelFramework: t("sd_iv_agent"), levelsOrRange: t("sd_iv_levels") },
+      modelFramework: t("sd_iv_agent"),
+      independentVariables: ivs.map((e) => ({
+        factor: e.label,
+        levelsOrRange: e.levels,
+        allocation: e.alloc,
+      })),
       controlVariables: t("sd_cv"),
-      designType: t("sd_design"),
+      design: designDescriptor(ivs),
       counterbalancing: t("sd_balancing"),
-      conditions: t("sd_conditions"),
+      totalConditions: ivs.length ? totalCells(ivs) : null,
+      betweenSubjectsCells: ivs.length ? betweenCells(ivs) : null,
       participants: t("sd_participants"),
     },
     datasetAndAgent: { agent: t("ds_agent"), datasetConfig: t("ds_dataset") },
@@ -569,12 +667,21 @@ function ReviewPage({ answers, onJump }: { answers: Answers; onJump: (id: string
         </RSection>
         <RSection title="Study Design, Variables & Participants" done={isPageComplete(PAGES[2], a)} onJump={() => onJump("studydesign")}>
           <RRow label="Dependent variable(s)" value={a.sd_dv} />
-          <RRow label="Independent variable" value={ivLabel(a)} />
-          <RRow label="IV levels / range" value={a.sd_iv_levels} />
+          <RRow label="Model / framework" value={a.sd_iv_agent} />
+          <div className="grid grid-cols-[170px_1fr] gap-3 py-1.5 text-[15px]">
+            <span className="text-neutral-500">Independent variables</span>
+            <span className="text-neutral-900">
+              {parseIvs(a).length === 0 ? <REmpty /> : (
+                <span className="space-y-0.5">
+                  {ivSummaryLines(a).map((line, i) => (<span key={i} className="block">{line}</span>))}
+                </span>
+              )}
+            </span>
+          </div>
           <RRow label="Control variables" value={a.sd_cv} />
-          <RRow label="Design type" value={a.sd_design} />
+          <RRow label="Design" value={designDescriptor(parseIvs(a))} />
           <RRow label="Counterbalancing" value={a.sd_balancing} />
-          <RRow label="Conditions / cells" value={a.sd_conditions} />
+          <RRow label="Conditions / cells" value={parseIvs(a).length ? String(totalCells(parseIvs(a))) : ""} />
           <RRow label="Participants (N)" value={a.sd_participants} />
           {check ? <div className={cn("mt-3 rounded-lg border px-3 py-2 text-sm", checkColor)} style={{ fontFamily: "ui-sans-serif, system-ui" }}>{check.message}</div> : null}
         </RSection>
@@ -647,9 +754,9 @@ const PAGE_CHAT: Record<string, { opening: string; focus: string; fields: string
     fields: ["rq"],
   },
   studydesign: {
-    opening: "Let's work out the study mechanics. To begin: what will you measure as your outcomes, and what's the one thing you want to manipulate?",
-    focus: "the dependent variable(s), the independent variable (model/framework, factor, and levels), control variables, design type, counterbalancing, number of conditions, and number of participants",
-    fields: ["sd_dv", "sd_iv_agent", "sd_iv", "sd_iv_levels", "sd_cv", "sd_design", "sd_balancing", "sd_conditions", "sd_participants"],
+    opening: "Let's work out the study mechanics. To begin: what will you measure as your outcomes, and what's the model/framework you're studying (CoAX, CoXAM, or Sim2Real)?",
+    focus: "the dependent variable(s), the model/framework, control variables, counterbalancing, and number of participants. Note: the independent variables themselves (factor, levels, within/between) are added by the user in the panel on the left — guide them on what to pick, but you cannot set IVs yourself.",
+    fields: ["sd_dv", "sd_iv_agent", "sd_cv", "sd_balancing", "sd_participants"],
   },
   dataset: {
     opening: "Last piece: which agent will participants evaluate — CoAX or CoXAM — and how are the trials and datasets set up?",
@@ -797,3 +904,5 @@ function ChatPanel({ opening, allowedFields, context, onApplyUpdates }: { openin
     </div>
   );
 }
+
+export default ExperimentWizard;
