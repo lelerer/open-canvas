@@ -151,7 +151,7 @@ export const PAGES: Page[] = [
     navTitle: "Overview",
     section: "Getting started",
     kind: "text",
-    prompt: "What experiment do you want to test on?",
+    prompt: "What are you hoping to test or explore?",
     placeholder: "e.g. I want to compare two XAI explanation styles and see how each affects users' trust calibration…",
     required: true,
   },
