@@ -4,7 +4,7 @@
 
 export type Answers = Record<string, string>;
 
-export type PageKind = "text" | "studydesign" | "dataset";
+export type PageKind = "text" | "studydesign" | "dataset" | "review";
 
 export interface Page {
   id: string;
@@ -179,6 +179,12 @@ export const PAGES: Page[] = [
     kind: "dataset",
     required: true,
   },
+  {
+    id: "review",
+    navTitle: "Review & Export",
+    section: "Final",
+    kind: "review",
+  },
 ];
 
 // ---- Completeness ----
@@ -189,7 +195,7 @@ export function isPageComplete(page: Page, a: Answers): boolean {
     return has("sd_dv") && has("sd_iv") && has("sd_iv_levels") && has("sd_cv") && has("sd_balancing") && has("sd_participants");
   }
   if (page.kind === "dataset") return has("ds_agent");
-  return true;
+  return true; // review or unknown
 }
 
 // ---- Participant-vs-design sanity check ----
@@ -261,10 +267,10 @@ export function buildTranscript(a: Answers): string {
     `Counterbalancing: ${v("sd_balancing") || "(none)"}`,
     `Participants (total N): ${v("sd_participants") || "(none)"}`,
   ].join("\n");
-  blocks.push(`Study Design\n${sd}`);
+  blocks.push(`Study Design, Variables & Participants\n${sd}`);
 
   const ds = [
-    `Agent for evaluation: ${v("ds_agent") || "(none)"}`,
+    `Agent under evaluation: ${v("ds_agent") || "(none)"}`,
     `Dataset / trial configuration: ${v("ds_dataset") || "(none)"}`,
   ].join("\n");
   blocks.push(`Dataset & Agent\n${ds}`);
