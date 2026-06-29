@@ -5,12 +5,12 @@ import {
   ChevronLeft,
   ChevronRight,
   FileText,
-  FileJson,
   Check,
   Loader2,
   Send,
   Wand2,
   Download,
+  Upload,
   X,
   Plus,
 } from "lucide-react";
@@ -25,10 +25,13 @@ import {
   Page,
   isPageComplete,
   validateParticipants,
-  AGENT_OPTIONS,
   BALANCING_METHODS,
+  DATASET_OPTIONS,
+  USER_MODELS,
+  UserModel,
   IV_AGENTS,
   IV_CATALOG,
+  IV_GROUP_ORDER,
   IvFactor,
   ivFactorsForAgent,
   ivLevelsFor,
@@ -38,6 +41,15 @@ import {
   totalCells,
   betweenCells,
   designDescriptor,
+  Variable,
+  parseVars,
+  varsSummary,
+  DV_CATALOG,
+  DV_GROUP_ORDER,
+  DvEntry,
+  parseDvs,
+  dvSummary,
+  dvDisplayName,
 } from "./questions";
 
 const STORAGE_KEY = "experiment-interview-v1";
@@ -45,10 +57,14 @@ const ACCENT = "#359793";
 const SERIF = 'Georgia, Cambria, "Times New Roman", serif';
 const LAST = PAGES.length - 1;
 
+const GLOBAL_OPENING =
+  "Hi! I'm your XAI experiment-design assistant. We'll build this together across the sections on the left — start wherever you like, even with a rough idea. What research direction or question do you have in mind?";
+
 export function ExperimentWizard() {
   const [answers, setAnswers] = useState<Answers>({});
   const [step, setStep] = useState(0);
   const [loaded, setLoaded] = useState(false);
+  const [messages, setMessages] = useState<ChatMsg[]>([{ role: "assistant", content: GLOBAL_OPENING }]);
 
   useEffect(() => {
     try {
@@ -82,7 +98,7 @@ export function ExperimentWizard() {
           <span className="grid h-7 w-7 place-items-center rounded-md text-white" style={{ backgroundColor: ACCENT }}>
             <FileText className="h-4 w-4" />
           </span>
-          <span className="text-sm font-semibold tracking-tight">Experiment Designer</span>
+          <span className="text-sm font-semibold tracking-tight">XAI Experiment Designer</span>
         </div>
         <nav className="flex-1 space-y-0.5 px-3 pb-4">
           {PAGES.map((item, i) => {
@@ -129,7 +145,7 @@ export function ExperimentWizard() {
               ) : page.kind === "studydesign" ? (
                 <StudyDesignBody answers={answers} setAnswer={setAnswer} />
               ) : (
-                <DatasetBody answers={answers} setAnswer={setAnswer} />
+                <UserModelBody answers={answers} setAnswer={setAnswer} />
               )}
             </div>
           )}
@@ -155,12 +171,12 @@ export function ExperimentWizard() {
         </footer>
       </div>
 
-      {/* Right — chat, always present, side by side */}
+      {/* Right — chat: one ongoing conversation, aware of every page, side by side */}
       <div className="hidden w-[26rem] shrink-0 border-l border-neutral-200 md:flex">
         <ChatPanel
-          key={page.id}
-          opening={(PAGE_CHAT[page.id] ?? PAGE_CHAT.overview).opening}
-          allowedFields={(PAGE_CHAT[page.id] ?? PAGE_CHAT.overview).fields}
+          messages={messages}
+          setMessages={setMessages}
+          allowedFields={(PAGE_CHAT[page.id] ?? { fields: [] }).fields}
           context={buildChatContext(page, answers)}
           onApplyUpdates={applyUpdates}
         />
@@ -257,7 +273,6 @@ function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setAnswer: 
   const a = answers;
   const ivs = parseIvs(a);
   const cells = totalCells(ivs);
-  const design = designDescriptor(ivs);
   const check = validateParticipants(a);
   const checkColor =
     check?.level === "ok" ? "text-emerald-700"
@@ -273,49 +288,257 @@ function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setAnswer: 
 
       <div className="mt-8 space-y-7">
         <div>
-          <DocLabel>We measure</DocLabel>
-          <DocText value={a.sd_dv ?? ""} onChange={(v) => setAnswer("sd_dv", v)} placeholder="the dependent variable(s) — e.g. trust calibration (7-pt), task accuracy (%), decision time (s)" multiline />
+          <DocLabel>Dependent Variables (DV)</DocLabel>
+          <DvBuilder answers={answers} setAnswer={setAnswer} />
         </div>
 
         <div>
-          <DocLabel>We manipulate · independent variable(s)</DocLabel>
+          <DocLabel>Independent Variable(s)</DocLabel>
           <IvBuilder answers={answers} setAnswer={setAnswer} />
         </div>
 
         <div>
-          <DocLabel>We hold constant</DocLabel>
-          <DocText value={a.sd_cv ?? ""} onChange={(v) => setAnswer("sd_cv", v)} placeholder="the control variables — e.g. same dataset, task length, and device across conditions" multiline />
+          <DocLabel>Control Variables (CV)</DocLabel>
+          <VariableList valueKey="sd_cv" answers={answers} setAnswer={setAnswer} namePlaceholder="e.g. dataset" />
+        </div>
+
+        <div>
+          <DocLabel>Random Variables (RV)</DocLabel>
+          <VariableList valueKey="sd_rv" answers={answers} setAnswer={setAnswer} namePlaceholder="e.g. participant, stimulus order" />
         </div>
 
         <div className="border-t border-neutral-100 pt-6">
-          <DocLabel>Structure</DocLabel>
-          <p className="mt-1 text-[15px] leading-8 text-neutral-800">
-            This is a <span className="font-medium">{design || "—"}</span> design with{" "}
-            <span className="inline-block align-baseline" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
-              <DocSelect value={a.sd_balancing ?? ""} onChange={(v) => setAnswer("sd_balancing", v)} options={BALANCING_METHODS} placeholder="counterbalancing" />
-            </span>.
-          </p>
-          <p className="mt-1 text-xs text-neutral-400" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
-            Within/between is set per independent variable above; “{design || "—"}” is derived from those choices.
-          </p>
+          <DocLabel>Dataset</DocLabel>
+          <DatasetPicker answers={answers} setAnswer={setAnswer} />
         </div>
 
         <div className="border-t border-neutral-100 pt-6">
           <DocLabel>Participants</DocLabel>
-          <p className="mt-1 text-[15px] leading-8 text-neutral-800">
-            We will recruit{" "}
-            <input
-              type="number"
-              value={a.sd_participants ?? ""}
-              onChange={(e) => setAnswer("sd_participants", e.target.value)}
-              placeholder="N"
-              className="w-16 border-0 border-b border-neutral-200 bg-transparent px-0 py-0.5 text-center text-[15px] text-neutral-900 outline-none placeholder:text-neutral-400 focus:border-neutral-500"
-            />{" "}
-            participants across <span className="font-medium">{cells}</span> condition{cells === 1 ? "" : "s"}.
-          </p>
-          {check ? <p className={cn("mt-2 text-sm", checkColor)} style={{ fontFamily: "ui-sans-serif, system-ui" }}>{check.message}</p> : null}
+          {(() => {
+            const numCls = "w-16 border-0 border-b border-neutral-200 bg-transparent px-0 py-0.5 text-center text-[15px] text-neutral-900 outline-none placeholder:text-neutral-400 focus:border-neutral-500";
+            const per = parseInt(a.sd_participants || "", 10) || 0;
+            const between = betweenCells(ivs);
+            const totalP = per * (between || 1);
+            const timePer = parseFloat(a.sd_time_per || "") || 0;
+            const costPer = parseFloat(a.sd_cost_per || "") || 0;
+            const totalMin = totalP * timePer;
+            const totalCost = totalP * costPer;
+            const hrs = totalMin / 60;
+            return (
+              <>
+                <p className="mt-1 text-[15px] leading-8 text-neutral-800">
+                  We will recruit{" "}
+                  <input type="number" value={a.sd_participants ?? ""} onChange={(e) => setAnswer("sd_participants", e.target.value)} placeholder="N" className={numCls} />{" "}
+                  participants for each condition.
+                </p>
+                <p className="text-[15px] leading-8 text-neutral-800">
+                  Each participant takes{" "}
+                  <input type="number" value={a.sd_time_per ?? ""} onChange={(e) => setAnswer("sd_time_per", e.target.value)} placeholder="min" className={numCls} />{" "}
+                  minutes and costs{" "}
+                  <input type="number" value={a.sd_cost_per ?? ""} onChange={(e) => setAnswer("sd_cost_per", e.target.value)} placeholder="0" className={numCls} />{" "}
+                  per session.
+                </p>
+                <div className="mt-2 rounded-lg bg-neutral-50 px-3 py-2 text-sm text-neutral-600" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+                  <div><span className="text-neutral-400">Total participants:</span> <span className="font-medium text-neutral-800">{totalP}</span> ({per} × {between || 1} between-subjects group{between === 1 ? "" : "s"}, {cells} cell{cells === 1 ? "" : "s"})</div>
+                  {totalMin > 0 ? <div><span className="text-neutral-400">Estimated total time:</span> <span className="font-medium text-neutral-800">{totalMin} min</span> (~{hrs.toFixed(1)} h)</div> : null}
+                  {totalCost > 0 ? <div><span className="text-neutral-400">Estimated total cost:</span> <span className="font-medium text-neutral-800">{totalCost.toLocaleString()}</span></div> : null}
+                </div>
+                {check ? <p className={cn("mt-2 text-sm", checkColor)} style={{ fontFamily: "ui-sans-serif, system-ui" }}>{check.message}</p> : null}
+              </>
+            );
+          })()}
         </div>
       </div>
+    </div>
+  );
+}
+
+function DvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
+  const items = parseDvs(answers.sd_dv);
+
+  function save(next: DvEntry[]) { setAnswer("sd_dv", JSON.stringify(next)); }
+  function add() { save([...items, { measure: "", name: "", formula: "" }]); }
+  function remove(i: number) { save(items.filter((_, idx) => idx !== i)); }
+  function patch(i: number, p: Partial<DvEntry>) { save(items.map((e, idx) => (idx === i ? { ...e, ...p } : e))); }
+  function setMeasure(i: number, id: string) {
+    if (id === "custom") patch(i, { measure: "custom", name: items[i]?.name || "" });
+    else patch(i, { measure: id, name: "" });
+  }
+
+  const grouped = DV_GROUP_ORDER.filter((g) => g !== "Custom").map((g) => ({ group: g, items: DV_CATALOG.filter((d) => d.group === g) })).filter((x) => x.items.length);
+
+  return (
+    <div style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+      {items.length === 0 ? <p className="text-sm text-neutral-400">No dependent variables yet — add one below.</p> : null}
+
+      <div className="space-y-3">
+        {items.map((e, i) => {
+          const def = e.measure && e.measure !== "custom" ? DV_CATALOG.find((d) => d.id === e.measure)?.def : "";
+          return (
+            <div key={i} className="rounded-lg border border-neutral-200 bg-white p-3">
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-semibold text-neutral-400">DV {i + 1}</span>
+                <select
+                  value={e.measure}
+                  onChange={(ev) => setMeasure(i, ev.target.value)}
+                  className={cn("max-w-[18rem] flex-1 truncate border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none focus:border-neutral-500", e.measure ? "text-neutral-900" : "text-neutral-400")}
+                >
+                  {!e.measure ? <option value="">a measure</option> : null}
+                  {grouped.map((g) => (
+                    <optgroup key={g.group} label={g.group}>
+                      {g.items.map((d) => (<option key={d.id} value={d.id} title={d.def} className="text-neutral-900">{d.label}</option>))}
+                    </optgroup>
+                  ))}
+                  <optgroup label="Custom">
+                    <option value="custom" className="text-neutral-900">Custom DV (define formula)…</option>
+                  </optgroup>
+                </select>
+                <button type="button" onClick={() => remove(i)} className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600" aria-label="Remove DV">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {def ? <p className="mt-1 text-xs text-neutral-400">{def}</p> : null}
+
+              {e.measure === "custom" ? (
+                <div className="mt-2 space-y-2">
+                  <input
+                    value={e.name}
+                    onChange={(ev) => patch(i, { name: ev.target.value })}
+                    placeholder="DV name (e.g. Calibrated trust index)"
+                    className="w-full border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none placeholder:text-neutral-300 focus:border-neutral-500"
+                  />
+                  <textarea
+                    value={e.formula ?? ""}
+                    onChange={(ev) => patch(i, { formula: ev.target.value })}
+                    placeholder="Precise formula / how it's calculated — e.g. mean(|confidence − correctness|) per participant"
+                    rows={2}
+                    className="w-full resize-y rounded-md border border-neutral-200 bg-white px-3 py-2 font-mono text-[13px] outline-none placeholder:text-neutral-300 focus:border-neutral-400"
+                  />
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+
+        <button type="button" onClick={add} className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:bg-neutral-50">
+          <Plus className="h-4 w-4" /> Add dependent variable
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function VariableList({ valueKey, answers, setAnswer, namePlaceholder }: { valueKey: string; answers: Answers; setAnswer: (id: string, v: string) => void; namePlaceholder?: string }) {
+  const items = parseVars(answers[valueKey]);
+  const [types, setTypes] = useState<string[]>([]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("experiment-var-types");
+      if (raw) setTypes(JSON.parse(raw));
+    } catch { /* ignore */ }
+  }, []);
+  function rememberType(t: string) {
+    const tt = t.trim();
+    if (!tt || types.includes(tt)) return;
+    const next = [...types, tt];
+    setTypes(next);
+    try { localStorage.setItem("experiment-var-types", JSON.stringify(next)); } catch { /* ignore */ }
+  }
+
+  function save(next: Variable[]) {
+    setAnswer(valueKey, JSON.stringify(next));
+  }
+  function add() { save([...items, { name: "", type: "" }]); }
+  function remove(i: number) { save(items.filter((_, idx) => idx !== i)); }
+  function update(i: number, patch: Partial<Variable>) {
+    save(items.map((v, idx) => (idx === i ? { ...v, ...patch } : v)));
+  }
+
+  const listId = `vartypes-${valueKey}`;
+  const inputCls = "border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none placeholder:text-neutral-300 focus:border-neutral-500";
+
+  return (
+    <div style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+      <datalist id={listId}>
+        {types.map((t) => (<option key={t} value={t} />))}
+      </datalist>
+
+      {items.length === 0 ? <p className="text-sm text-neutral-400">None yet — add one below.</p> : null}
+
+      <div className="space-y-2">
+        {items.map((v, i) => (
+          <div key={i} className="flex items-center gap-3">
+            <input
+              value={v.name}
+              onChange={(e) => update(i, { name: e.target.value })}
+              placeholder={namePlaceholder || "name"}
+              className={cn(inputCls, "flex-1")}
+            />
+            <input
+              value={v.type}
+              onChange={(e) => update(i, { type: e.target.value })}
+              onBlur={() => rememberType(v.type)}
+              list={listId}
+              placeholder="type (custom)"
+              className={cn(inputCls, "w-40")}
+            />
+            <button type="button" onClick={() => remove(i)} className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600" aria-label="Remove">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <button type="button" onClick={add} className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-dashed border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:bg-neutral-50">
+        <Plus className="h-4 w-4" /> Add variable
+      </button>
+    </div>
+  );
+}
+
+function DatasetPicker({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
+  const a = answers;
+  // user-uploaded CSV names are remembered in ds_custom_datasets (comma-joined)
+  const custom = (a.ds_custom_datasets || "").split("|").map((s) => s.trim()).filter(Boolean);
+  const options = [...DATASET_OPTIONS, ...custom];
+
+  function onUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const name = file.name.replace(/\.csv$/i, "");
+    const nextCustom = Array.from(new Set([...custom, name]));
+    setAnswer("ds_custom_datasets", nextCustom.join(" | "));
+    setAnswer("ds_dataset", name);
+    e.target.value = "";
+  }
+
+  return (
+    <div style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+      <div className="flex flex-wrap items-center gap-3">
+        <select
+          value={a.ds_dataset ?? ""}
+          onChange={(e) => setAnswer("ds_dataset", e.target.value)}
+          className={cn("min-w-[12rem] rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-400", a.ds_dataset ? "text-neutral-900" : "text-neutral-400")}
+        >
+          <option value="">— Select a dataset —</option>
+          <optgroup label="Available">
+            {DATASET_OPTIONS.map((d) => (<option key={d} value={d} className="text-neutral-900">{d}</option>))}
+          </optgroup>
+          {custom.length ? (
+            <optgroup label="Your uploads">
+              {custom.map((d) => (<option key={d} value={d} className="text-neutral-900">{d}</option>))}
+            </optgroup>
+          ) : null}
+        </select>
+
+        <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-dashed border-neutral-300 px-3 py-2 text-sm font-medium text-neutral-600 hover:bg-neutral-50">
+          <Upload className="h-4 w-4" /> Upload CSV
+          <input type="file" accept=".csv,text/csv" onChange={onUpload} className="hidden" />
+        </label>
+      </div>
+      <p className="mt-1.5 text-xs text-neutral-400">Pick a built-in dataset or upload your own CSV (the file name is recorded; data stays in your browser).</p>
     </div>
   );
 }
@@ -341,9 +564,7 @@ function AllocToggle({ value, onChange }: { value: string; onChange: (v: string)
   );
 }
 
-function IvLevelEditor({ entry, agent, onPatch }: { entry: IvEntry; agent: string; onPatch: (patch: Partial<IvEntry>) => void }) {
-  const factor: IvFactor | null = IV_CATALOG.find((f) => f.id === entry.factor) || null;
-  if (!factor) return null;
+function IvLevelEditor({ factor, entry, agent, onPatch }: { factor: IvFactor; entry: IvEntry; agent: string; onPatch: (patch: Partial<IvEntry>) => void }) {
   const levels = (entry.levels || "").split(" | ").map((s) => s.trim()).filter(Boolean);
   const numCls = "w-20 border-0 border-b border-neutral-200 bg-transparent px-0 py-0.5 text-center text-[15px] outline-none placeholder:text-neutral-400 focus:border-neutral-500";
 
@@ -392,7 +613,7 @@ function IvLevelEditor({ entry, agent, onPatch }: { entry: IvEntry; agent: strin
         <div className="space-y-2">
           <DocSelect
             value={entry.cogParam ?? ""}
-            onChange={(v) => onPatch({ cogParam: v, label: v ? `Cognitive: ${v}` : "Cognitive parameters", levels: "" })}
+            onChange={(v) => onPatch({ cogParam: v, label: v ? `Cognitive: ${v}` : "Cognitive Parameters", levels: "" })}
             options={cogParams.map((p) => p.name)}
             placeholder="choose a parameter"
           />
@@ -416,11 +637,33 @@ function IvLevelEditor({ entry, agent, onPatch }: { entry: IvEntry; agent: strin
   );
 }
 
+const IV_TYPES_KEY = "experiment-iv-types";
+// Replace with your real docs link for adding IV types.
+const IV_TYPES_DOCS = "#";
+
 function IvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
   const a = answers;
-  const agent = a.sd_iv_agent || a.ds_agent || "CoAX";
+  const agent = a.sd_iv_agent || "CoAX";
   const ivs = parseIvs(a);
-  const factors = ivFactorsForAgent(agent);
+
+  const [customs, setCustoms] = useState<IvFactor[]>([]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [draft, setDraft] = useState({ name: "", levels: "", def: "", pip: "", file: "" });
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(IV_TYPES_KEY);
+      if (raw) setCustoms(JSON.parse(raw));
+    } catch { /* ignore */ }
+  }, []);
+  function persistCustoms(next: IvFactor[]) {
+    setCustoms(next);
+    try { localStorage.setItem(IV_TYPES_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+  }
+
+  // built-ins available for this model + user-added custom types (available to all)
+  const factors = [...ivFactorsForAgent(agent), ...customs];
+  const findFactor = (id: string) => factors.find((f) => f.id === id) || null;
 
   // One-time migration from the old single-IV fields.
   useEffect(() => {
@@ -446,88 +689,226 @@ function IvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer: (id: s
   }
   function setAgent(v: string) {
     setAnswer("sd_iv_agent", v);
-    // factor availability changes with the model; clear factors that no longer exist
-    const valid = new Set(ivFactorsForAgent(v).map((f) => f.id));
+    const valid = new Set([...ivFactorsForAgent(v), ...customs].map((f) => f.id));
     save(ivs.map((e) => (valid.has(e.factor) ? e : { ...e, factor: "", label: "", levels: "", cogParam: "", min: "", max: "" })));
   }
-  function addIv() {
-    save([...ivs, { factor: "", label: "", levels: "", alloc: "Within-subjects" }]);
-  }
-  function removeIv(i: number) {
-    save(ivs.filter((_, idx) => idx !== i));
-  }
-  function patch(i: number, p: Partial<IvEntry>) {
-    save(ivs.map((e, idx) => (idx === i ? { ...e, ...p } : e)));
-  }
+  function addIv() { save([...ivs, { factor: "", label: "", levels: "", alloc: "Within-subjects" }]); }
+  function removeIv(i: number) { save(ivs.filter((_, idx) => idx !== i)); }
+  function patch(i: number, p: Partial<IvEntry>) { save(ivs.map((e, idx) => (idx === i ? { ...e, ...p } : e))); }
   function setFactor(i: number, id: string) {
-    const f = IV_CATALOG.find((x) => x.id === id) || null;
+    const f = findFactor(id);
     const p: Partial<IvEntry> = { factor: id, label: f ? f.label : "", levels: "", cogParam: "", min: "", max: "" };
     if (f?.kind === "binary" && f.binary) p.levels = `${f.binary[0]} vs ${f.binary[1]}`;
     patch(i, p);
   }
 
+  function addCustomType() {
+    const name = draft.name.trim();
+    if (!name) return;
+    const levels = draft.levels.split(",").map((s) => s.trim()).filter(Boolean);
+    const meta = [draft.def.trim(), draft.pip.trim() ? `pip: ${draft.pip.trim()}` : "", draft.file.trim() ? `spec: ${draft.file.trim()}` : ""].filter(Boolean).join(" · ");
+    const entry: IvFactor = {
+      id: `custom:${name}`,
+      label: name,
+      kind: "categorical",
+      group: "Custom",
+      def: meta || "Custom IV type.",
+      levels: levels.length ? levels : ["Level 1", "Level 2"],
+    };
+    persistCustoms([...customs.filter((c) => c.id !== entry.id), entry]);
+    setDraft({ name: "", levels: "", def: "", pip: "", file: "" });
+    setShowAdd(false);
+  }
+  function onSpecFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) setDraft((d) => ({ ...d, file: file.name }));
+    e.target.value = "";
+  }
+
+  // group factors for the dropdown
+  const grouped = IV_GROUP_ORDER.map((g) => ({ group: g, items: factors.filter((f) => (f.group || "Custom") === g) })).filter((x) => x.items.length);
+
   return (
     <div style={{ fontFamily: "ui-sans-serif, system-ui" }}>
-      {/* <p className="mt-1 text-[15px] leading-8 text-neutral-800" style={{ fontFamily: SERIF }}>
-        Using{" "}
-        <span className="inline-block align-baseline" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
-          <DocSelect value={agent} onChange={setAgent} options={IV_AGENTS} placeholder="model" />
-        </span>
-        , we manipulate:
-      </p> */}
+      <div className="mb-2 flex items-center gap-2 text-sm">
+        <span className="text-neutral-500">Model / framework:</span>
+        <DocSelect value={agent} onChange={setAgent} options={IV_AGENTS} placeholder="model" />
+      </div>
 
-      <div className="mt-2 space-y-3">
+      <div className="space-y-3">
         {ivs.length === 0 ? (
           <p className="text-sm text-neutral-400">No independent variables yet — add one below.</p>
         ) : null}
 
-        {ivs.map((entry, i) => (
-          <div key={i} className="rounded-lg border border-neutral-200 bg-white p-3">
-            <div className="flex items-center gap-3">
-              <span className="text-xs font-semibold text-neutral-400">IV {i + 1}</span>
-              <select
-                value={entry.factor}
-                onChange={(e) => setFactor(i, e.target.value)}
-                className={cn("max-w-[16rem] flex-1 truncate border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none focus:border-neutral-500", entry.factor ? "text-neutral-900" : "text-neutral-400")}
-              >
-                <option value="">a factor</option>
-                {factors.map((f) => (<option key={f.id} value={f.id} className="text-neutral-900">{f.label}</option>))}
-              </select>
-              <AllocToggle value={entry.alloc} onChange={(v) => patch(i, { alloc: v })} />
-              <button type="button" onClick={() => removeIv(i)} className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600" aria-label="Remove IV">
-                <X className="h-4 w-4" />
-              </button>
+        {ivs.map((entry, i) => {
+          const factor = findFactor(entry.factor);
+          return (
+            <div key={i} className="rounded-lg border border-neutral-200 bg-white p-3">
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-semibold text-neutral-400">IV {i + 1}</span>
+                <select
+                  value={entry.factor}
+                  onChange={(e) => setFactor(i, e.target.value)}
+                  className={cn("max-w-[18rem] flex-1 truncate border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none focus:border-neutral-500", entry.factor ? "text-neutral-900" : "text-neutral-400")}
+                >
+                  {!entry.factor ? <option value="">a factor</option> : null}
+                  {grouped.map((g) => (
+                    <optgroup key={g.group} label={g.group}>
+                      {g.items.map((f) => (<option key={f.id} value={f.id} title={f.def} className="text-neutral-900">{f.label}</option>))}
+                    </optgroup>
+                  ))}
+                </select>
+                <AllocToggle value={entry.alloc} onChange={(v) => patch(i, { alloc: v })} />
+                <button type="button" onClick={() => removeIv(i)} className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600" aria-label="Remove IV">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              {factor?.def ? <p className="mt-1 text-xs text-neutral-400">{factor.def}</p> : null}
+              {factor ? <IvLevelEditor factor={factor} entry={entry} agent={agent} onPatch={(p) => patch(i, p)} /> : null}
+              {entry.alloc === "Within-subjects" ? (
+                <div className="mt-2 flex items-center gap-2 text-sm text-neutral-600">
+                  <span className="text-neutral-500">Counterbalancing:</span>
+                  <select
+                    value={entry.balancing ?? ""}
+                    onChange={(e) => patch(i, { balancing: e.target.value })}
+                    className={cn("rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs outline-none focus:border-neutral-400", entry.balancing ? "text-neutral-900" : "text-neutral-400")}
+                  >
+                    <option value="">— none —</option>
+                    {BALANCING_METHODS.map((b) => (<option key={b} value={b} className="text-neutral-900">{b}</option>))}
+                  </select>
+                </div>
+              ) : null}
             </div>
-            <IvLevelEditor entry={entry} agent={agent} onPatch={(p) => patch(i, p)} />
-          </div>
-        ))}
+          );
+        })}
 
-        <button
-          type="button"
-          onClick={addIv}
-          className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:bg-neutral-50"
-        >
-          <Plus className="h-4 w-4" /> Add independent variable
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={addIv} className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:bg-neutral-50">
+            <Plus className="h-4 w-4" /> Add independent variable
+          </button>
+          <button type="button" onClick={() => setShowAdd((v) => !v)} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium" style={{ color: ACCENT }}>
+            <Upload className="h-4 w-4" /> Add IV type
+          </button>
+        </div>
+
+        {showAdd ? (
+          <div className="rounded-lg border border-neutral-200 bg-neutral-50/60 p-3">
+            <p className="text-sm font-medium text-neutral-800">Add a new IV type</p>
+            <p className="mt-0.5 text-xs text-neutral-400">
+              Define a custom factor, or attach a spec / Python / pip package.{" "}
+              <a href={IV_TYPES_DOCS} target="_blank" rel="noreferrer" className="underline" style={{ color: ACCENT }}>How it works ↗</a>
+            </p>
+            <div className="mt-3 space-y-2">
+              <TextInput value={draft.name} onChange={(v) => setDraft({ ...draft, name: v })} placeholder="Type name (e.g. Explanation Length)" />
+              <TextInput value={draft.levels} onChange={(v) => setDraft({ ...draft, levels: v })} placeholder="Levels, comma-separated (e.g. Short, Long)" />
+              <TextInput value={draft.def} onChange={(v) => setDraft({ ...draft, def: v })} placeholder="One-line definition (optional)" />
+              <TextInput value={draft.pip} onChange={(v) => setDraft({ ...draft, pip: v })} placeholder="pip install … (optional)" />
+              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-dashed border-neutral-300 px-3 py-1.5 text-sm text-neutral-600 hover:bg-neutral-100">
+                <Upload className="h-4 w-4" /> {draft.file ? draft.file : "Upload spec / .py (optional)"}
+                <input type="file" accept=".py,.json,.yaml,.yml,.txt" onChange={onSpecFile} className="hidden" />
+              </label>
+            </div>
+            <div className="mt-3 flex gap-2">
+              <button onClick={addCustomType} className="rounded-md px-3 py-1.5 text-sm font-medium text-white" style={{ backgroundColor: ACCENT }}>Add type</button>
+              <button onClick={() => setShowAdd(false)} className="rounded-md border border-neutral-200 px-3 py-1.5 text-sm text-neutral-600 hover:bg-neutral-50">Cancel</button>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
 }
 
-function DatasetBody({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
+function UserModelBody({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
   const a = answers;
+  const [customs, setCustoms] = useState<UserModel[]>([]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [draft, setDraft] = useState({ name: "", full: "", description: "", category: "Custom" });
+
+  // load user-added models from localStorage
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("experiment-user-models");
+      if (raw) setCustoms(JSON.parse(raw));
+    } catch { /* ignore */ }
+  }, []);
+  function persistCustoms(next: UserModel[]) {
+    setCustoms(next);
+    try { localStorage.setItem("experiment-user-models", JSON.stringify(next)); } catch { /* ignore */ }
+  }
+  function addCustom() {
+    const name = draft.name.trim();
+    if (!name) return;
+    const entry: UserModel = { id: name, name, full: draft.full.trim() || name, description: draft.description.trim() || "(custom model)", category: "Custom" };
+    persistCustoms([...customs, entry]);
+    setAnswer("user_model", name);
+    setDraft({ name: "", full: "", description: "", category: "Custom" });
+    setShowAdd(false);
+  }
+
+  const all = [...USER_MODELS, ...customs];
+  const cats = ["Cognitive model", "ML proxy", "Custom"];
+
   return (
     <>
-      <h1 className="text-2xl font-semibold leading-snug tracking-tight">Dataset & agent</h1>
-      <p className="mt-2 text-sm text-neutral-500">Choose the agent participants evaluate, and describe the trial configuration.</p>
+      <h1 className="text-2xl font-semibold leading-snug tracking-tight">User model</h1>
+      <p className="mt-2 text-sm text-neutral-500">The model whose behaviour stands in for (or simulates) the user — a cognitive model or an ML proxy. Pick one, or add your own.</p>
 
-      <Field label="Agent under evaluation" hint="The system whose predictions/explanations participants judge.">
-        <Select value={a.ds_agent ?? ""} onChange={(v) => setAnswer("ds_agent", v)} options={AGENT_OPTIONS} placeholder="— Select an agent —" />
-      </Field>
+      <div className="mt-6 space-y-6">
+        {cats.map((cat) => {
+          const items = all.filter((m) => m.category === cat);
+          if (!items.length) return null;
+          return (
+            <div key={cat}>
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">{cat}</p>
+              <div className="space-y-2">
+                {items.map((m) => {
+                  const on = a.user_model === m.id;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setAnswer("user_model", m.id)}
+                      className={cn(
+                        "flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors",
+                        on ? "border-transparent ring-2" : "border-neutral-200 hover:bg-neutral-50"
+                      )}
+                      style={on ? ({ ["--tw-ring-color" as any]: ACCENT, borderColor: ACCENT } as React.CSSProperties) : undefined}
+                    >
+                      <span className={cn("mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border", on ? "border-transparent text-white" : "border-neutral-300")} style={on ? { backgroundColor: ACCENT } : undefined}>
+                        {on ? <Check className="h-3 w-3" /> : null}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-neutral-900">{m.name} <span className="font-normal text-neutral-400">· {m.full}</span></span>
+                        <span className="mt-0.5 block text-sm text-neutral-500">{m.description}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
 
-      <Field label="Dataset / trial configuration" hint="Practice / baseline / main blocks, trials per block, analysed trials per participant.">
-        <Textarea value={a.ds_dataset ?? ""} onChange={(e) => setAnswer("ds_dataset", e.target.value)} placeholder="e.g. 5 practice + 40 main trials, 2 blocks, dataset = German Credit, 20 analysed trials per participant" className="min-h-[120px] resize-y bg-white text-sm" />
-      </Field>
+        {showAdd ? (
+          <div className="rounded-xl border border-neutral-200 p-3">
+            <p className="mb-2 text-sm font-medium text-neutral-800">Add a user model</p>
+            <div className="space-y-2">
+              <TextInput value={draft.name} onChange={(v) => setDraft({ ...draft, name: v })} placeholder="Short name (e.g. MyModel)" />
+              <TextInput value={draft.full} onChange={(v) => setDraft({ ...draft, full: v })} placeholder="Full name" />
+              <Textarea value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="One-line description" className="min-h-[60px] resize-y bg-white text-sm" />
+            </div>
+            <div className="mt-2 flex gap-2">
+              <button onClick={addCustom} className="rounded-md px-3 py-1.5 text-sm font-medium text-white" style={{ backgroundColor: ACCENT }}>Add</button>
+              <button onClick={() => setShowAdd(false)} className="rounded-md border border-neutral-200 px-3 py-1.5 text-sm text-neutral-600 hover:bg-neutral-50">Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:bg-neutral-50">
+            <Plus className="h-4 w-4" /> Add your own user model
+          </button>
+        )}
+      </div>
     </>
   );
 }
@@ -539,60 +920,137 @@ function ivSummaryLines(a: Answers): string[] {
   if (!ivs.length) return [];
   return ivs.map((e, i) => {
     const allocShort = e.alloc === "Between-subjects" ? "between" : "within";
-    return `IV ${i + 1}: ${e.label || "(factor not set)"} — ${e.levels || "(no levels)"} [${allocShort}-subjects]`;
+    const bal = e.alloc === "Within-subjects" && e.balancing ? `, ${e.balancing}` : "";
+    return `IV ${i + 1}: ${e.label || "(factor not set)"} — ${e.levels || "(no levels)"} [${allocShort}-subjects${bal}]`;
   });
+}
+
+function participantTotals(a: Answers) {
+  const ivs = parseIvs(a);
+  const per = parseInt(a.sd_participants || "", 10) || 0;
+  const between = betweenCells(ivs) || 1;
+  const cells = totalCells(ivs);
+  const totalP = per * between;
+  const timePer = parseFloat(a.sd_time_per || "") || 0;
+  const costPer = parseFloat(a.sd_cost_per || "") || 0;
+  return { per, between, cells, totalP, timePer, costPer, totalMin: totalP * timePer, totalCost: totalP * costPer };
 }
 
 function buildExportText(a: Answers): string {
   const v = (k: string) => (a[k] || "").trim() || "(not provided)";
   const ivs = parseIvs(a);
   const ivLines = ivs.length ? ivSummaryLines(a) : ["(none provided)"];
+  const p = participantTotals(a);
   return [
     "EXPERIMENT DESIGN", "=================", "",
-    "OVERVIEW", v("overview"), "",
     "RESEARCH QUESTIONS", v("rq"), "",
     "STUDY DESIGN, VARIABLES & PARTICIPANTS",
-    `Dependent variable(s): ${v("sd_dv")}`,
+    `Dependent variables (DV): ${dvSummary(parseDvs(a.sd_dv)) || "(not provided)"}`,
+    ...parseDvs(a.sd_dv).filter((e) => (e.formula || "").trim()).map((e) => `    formula[${dvDisplayName(e)}]: ${e.formula}`),
     `Model / framework: ${v("sd_iv_agent")}`,
     "Independent variables:",
     ...ivLines.map((l) => `  - ${l}`),
-    `Control variables: ${v("sd_cv")}`,
+    `Control variables (CV): ${varsSummary(parseVars(a.sd_cv)) || "(not provided)"}`,
+    `Random variables (RV): ${varsSummary(parseVars(a.sd_rv)) || "(not provided)"}`,
     `Design: ${designDescriptor(ivs) || "(not provided)"}`,
-    `Counterbalancing: ${v("sd_balancing")}`,
-    `Total conditions / cells: ${ivs.length ? totalCells(ivs) : "(n/a)"}`,
-    `Between-subjects cells: ${ivs.length ? betweenCells(ivs) : "(n/a)"}`,
-    `Participants (total N): ${v("sd_participants")}`, "",
-    "DATASET & AGENT",
-    `Agent under evaluation: ${v("ds_agent")}`,
-    `Dataset / trial configuration: ${v("ds_dataset")}`, "",
+    `Dataset: ${v("ds_dataset")}`,
+    `Total conditions / cells: ${ivs.length ? p.cells : "(n/a)"}`,
+    `Participants per condition: ${a.sd_participants ? p.per : "(not provided)"}`,
+    `Total participants: ${a.sd_participants ? p.totalP : "(n/a)"}`,
+    `Time per participant (min): ${a.sd_time_per || "(not provided)"}`,
+    `Cost per participant: ${a.sd_cost_per || "(not provided)"}`,
+    `Estimated total time (min): ${p.totalMin || "(n/a)"}`,
+    `Estimated total cost: ${p.totalCost || "(n/a)"}`, "",
+    "APPARATUS", v("apparatus"), "",
+    "PROCEDURE", v("procedure"), "",
+    "USER MODEL", v("user_model"), "",
   ].join("\n");
 }
 
 function buildExportJson(a: Answers): string {
   const t = (k: string) => (a[k] || "").trim();
   const ivs = parseIvs(a);
+  const p = participantTotals(a);
   const obj = {
-    overview: t("overview"),
     researchQuestions: t("rq"),
     studyDesign: {
-      dependentVariables: t("sd_dv"),
+      dependentVariables: parseDvs(a.sd_dv),
       modelFramework: t("sd_iv_agent"),
       independentVariables: ivs.map((e) => ({
         factor: e.label,
         levelsOrRange: e.levels,
         allocation: e.alloc,
+        counterbalancing: e.alloc === "Within-subjects" ? e.balancing || "" : "",
       })),
-      controlVariables: t("sd_cv"),
+      controlVariablesCV: parseVars(a.sd_cv),
+      randomVariablesRV: parseVars(a.sd_rv),
       design: designDescriptor(ivs),
-      counterbalancing: t("sd_balancing"),
-      totalConditions: ivs.length ? totalCells(ivs) : null,
-      betweenSubjectsCells: ivs.length ? betweenCells(ivs) : null,
-      participants: t("sd_participants"),
+      dataset: t("ds_dataset"),
+      totalConditions: ivs.length ? p.cells : null,
+      betweenSubjectsCells: ivs.length ? p.between : null,
+      participantsPerCondition: a.sd_participants ? p.per : null,
+      totalParticipants: a.sd_participants ? p.totalP : null,
+      timePerParticipantMin: a.sd_time_per ? p.timePer : null,
+      costPerParticipant: a.sd_cost_per ? p.costPer : null,
+      estimatedTotalTimeMin: p.totalMin || null,
+      estimatedTotalCost: p.totalCost || null,
     },
-    datasetAndAgent: { agent: t("ds_agent"), datasetConfig: t("ds_dataset") },
+    apparatus: t("apparatus"),
+    procedure: t("procedure"),
+    userModel: t("user_model"),
     _rawAnswers: a,
   };
   return JSON.stringify(obj, null, 2);
+}
+
+function esc(s: string): string {
+  return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Word-compatible HTML (.doc) — preserves headings, bold labels, and tables.
+function buildExportDoc(a: Answers): string {
+  const t = (k: string) => esc((a[k] || "").trim()) || "<i>(not provided)</i>";
+  const ivs = parseIvs(a);
+  const p = participantTotals(a);
+  const dvs = parseDvs(a.sd_dv);
+  const dvHtml = dvs.length
+    ? "<ul>" + dvs.map((e) => `<li>${esc(dvDisplayName(e))}${(e.formula || "").trim() ? ` — <i>formula:</i> <code>${esc(e.formula || "")}</code>` : ""}</li>`).join("") + "</ul>"
+    : "<i>(none)</i>";
+  const ivHtml = ivs.length
+    ? "<ul>" + ivSummaryLines(a).map((l) => `<li>${esc(l)}</li>`).join("") + "</ul>"
+    : "<i>(none)</i>";
+  const row = (k: string, val: string) => `<p><b>${k}:</b> ${val}</p>`;
+
+  const body = `
+    <h1>Experiment Design</h1>
+    <h2>Research Questions</h2>
+    <p>${esc((a.rq || "").trim()).replace(/\n/g, "<br/>") || "<i>(not provided)</i>"}</p>
+    <h2>Study Design, Variables &amp; Participants</h2>
+    <p><b>Dependent variables (DV):</b></p>${dvHtml}
+    ${row("Model / framework", t("sd_iv_agent"))}
+    <p><b>Independent variables:</b></p>${ivHtml}
+    ${row("Control variables (CV)", esc(varsSummary(parseVars(a.sd_cv))) || "<i>(none)</i>")}
+    ${row("Random variables (RV)", esc(varsSummary(parseVars(a.sd_rv))) || "<i>(none)</i>")}
+    ${row("Design", esc(designDescriptor(ivs)) || "<i>(none)</i>")}
+    ${row("Dataset", t("ds_dataset"))}
+    ${row("Conditions / cells", String(ivs.length ? p.cells : "n/a"))}
+    ${row("Participants per condition", a.sd_participants ? String(p.per) : "<i>(not provided)</i>")}
+    ${row("Total participants", a.sd_participants ? String(p.totalP) : "n/a")}
+    ${row("Estimated total time", p.totalMin ? `${p.totalMin} min (~${(p.totalMin / 60).toFixed(1)} h)` : "n/a")}
+    ${row("Estimated total cost", p.totalCost ? String(p.totalCost) : "n/a")}
+    <h2>Apparatus</h2>
+    <p>${esc((a.apparatus || "").trim()).replace(/\n/g, "<br/>") || "<i>(not provided)</i>"}</p>
+    <h2>Procedure</h2>
+    <p>${esc((a.procedure || "").trim()).replace(/\n/g, "<br/>") || "<i>(not provided)</i>"}</p>
+    <h2>User Model</h2>
+    <p>${t("user_model")}</p>
+  `;
+  return `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>Experiment Design</title><style>
+    body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1f2937;}
+    h1{font-size:20pt;} h2{font-size:14pt;border-bottom:1px solid #ccc;padding-bottom:2pt;margin-top:16pt;}
+    code{font-family:Consolas,monospace;background:#f3f4f6;}
+    ul{margin:4pt 0 8pt 0;}
+  </style></head><body>${body}</body></html>`;
 }
 
 function downloadFile(name: string, content: string, type: string) {
@@ -646,27 +1104,25 @@ function ReviewPage({ answers, onJump }: { answers: Answers; onJump: (id: string
       <div className="flex items-start justify-between gap-4" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Review & export</h1>
-          <p className="mt-1 text-sm text-neutral-500">A read-only summary of your design. Export it as plain text or JSON.</p>
+          <p className="mt-1 text-sm text-neutral-500">A read-only summary of your design. Download it as a Word document or JSON.</p>
         </div>
-        <div className="flex shrink-0 gap-2">
-          <Button variant="outline" size="sm" onClick={() => downloadFile("experiment-design.txt", buildExportText(a), "text/plain;charset=utf-8")}>
-            <Download className="mr-1 h-4 w-4" /> .txt
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="text-sm text-neutral-400">Export:</span>
+          <Button variant="outline" size="sm" onClick={() => downloadFile("experiment-design.doc", buildExportDoc(a), "application/msword")}>
+            <Download className="mr-1 h-4 w-4" /> Word (.doc)
           </Button>
           <Button variant="outline" size="sm" onClick={() => downloadFile("experiment-design.json", buildExportJson(a), "application/json")}>
-            <FileJson className="mr-1 h-4 w-4" /> .json
+            <Download className="mr-1 h-4 w-4" /> JSON (.json)
           </Button>
         </div>
       </div>
 
       <div className="mt-8 space-y-6" style={{ fontFamily: SERIF }}>
-        <RSection title="Overview" done={isPageComplete(PAGES[0], a)} onJump={() => onJump("overview")}>
-          {has("overview") ? <p className="leading-7 text-[15px] text-neutral-800">{a.overview}</p> : <REmpty />}
-        </RSection>
-        <RSection title="Research Questions" done={isPageComplete(PAGES[1], a)} onJump={() => onJump("rq")}>
+        <RSection title="Research Questions" done={isPageComplete(PAGES[0], a)} onJump={() => onJump("rq")}>
           {has("rq") ? <p className="whitespace-pre-wrap leading-7 text-[15px] text-neutral-800">{a.rq}</p> : <REmpty />}
         </RSection>
-        <RSection title="Study Design, Variables & Participants" done={isPageComplete(PAGES[2], a)} onJump={() => onJump("studydesign")}>
-          <RRow label="Dependent variable(s)" value={a.sd_dv} />
+        <RSection title="Study Design, Variables & Participants" done={isPageComplete(PAGES[1], a)} onJump={() => onJump("studydesign")}>
+          <RRow label="Dependent variables" value={dvSummary(parseDvs(a.sd_dv))} />
           <RRow label="Model / framework" value={a.sd_iv_agent} />
           <div className="grid grid-cols-[170px_1fr] gap-3 py-1.5 text-[15px]">
             <span className="text-neutral-500">Independent variables</span>
@@ -678,16 +1134,25 @@ function ReviewPage({ answers, onJump }: { answers: Answers; onJump: (id: string
               )}
             </span>
           </div>
-          <RRow label="Control variables" value={a.sd_cv} />
+          <RRow label="Control variables (CV)" value={varsSummary(parseVars(a.sd_cv))} />
+          <RRow label="Random variables (RV)" value={varsSummary(parseVars(a.sd_rv))} />
           <RRow label="Design" value={designDescriptor(parseIvs(a))} />
-          <RRow label="Counterbalancing" value={a.sd_balancing} />
+          <RRow label="Dataset" value={a.ds_dataset} />
           <RRow label="Conditions / cells" value={parseIvs(a).length ? String(totalCells(parseIvs(a))) : ""} />
-          <RRow label="Participants (N)" value={a.sd_participants} />
+          <RRow label="Participants / condition" value={a.sd_participants} />
+          <RRow label="Total participants" value={a.sd_participants ? String(participantTotals(a).totalP) : ""} />
+          {participantTotals(a).totalMin ? <RRow label="Est. total time" value={`${participantTotals(a).totalMin} min (~${(participantTotals(a).totalMin / 60).toFixed(1)} h)`} /> : null}
+          {participantTotals(a).totalCost ? <RRow label="Est. total cost" value={String(participantTotals(a).totalCost)} /> : null}
           {check ? <div className={cn("mt-3 rounded-lg border px-3 py-2 text-sm", checkColor)} style={{ fontFamily: "ui-sans-serif, system-ui" }}>{check.message}</div> : null}
         </RSection>
-        <RSection title="Dataset & Agent" done={isPageComplete(PAGES[3], a)} onJump={() => onJump("dataset")}>
-          <RRow label="Agent under evaluation" value={a.ds_agent} />
-          <RRow label="Dataset / trial config" value={a.ds_dataset} />
+        <RSection title="Apparatus" done={isPageComplete(PAGES[2], a)} onJump={() => onJump("apparatus")}>
+          {has("apparatus") ? <p className="whitespace-pre-wrap leading-7 text-[15px] text-neutral-800">{a.apparatus}</p> : <REmpty />}
+        </RSection>
+        <RSection title="Procedure" done={isPageComplete(PAGES[3], a)} onJump={() => onJump("procedure")}>
+          {has("procedure") ? <p className="whitespace-pre-wrap leading-7 text-[15px] text-neutral-800">{a.procedure}</p> : <REmpty />}
+        </RSection>
+        <RSection title="User Model" done={isPageComplete(PAGES[4], a)} onJump={() => onJump("usermodel")}>
+          <RRow label="User model" value={a.user_model} />
         </RSection>
       </div>
     </div>
@@ -726,70 +1191,78 @@ function stripMd(text: string): string {
 }
 
 const FIELD_LABELS: Record<string, string> = {
-  overview: "experiment overview",
   rq: "research question(s)",
-  sd_dv: "dependent variable(s)",
+  sd_dv: "dependent variables",
   sd_iv_agent: "model/framework",
-  sd_iv: "independent variable (factor)",
-  sd_iv_levels: "IV levels / range",
-  sd_cv: "control variables",
-  sd_design: "design type (within/between/mixed)",
-  sd_balancing: "counterbalancing method",
-  sd_conditions: "number of conditions",
+  sd_cv: "control variables (CV)",
+  sd_rv: "random variables (RV)",
   sd_participants: "number of participants",
-  ds_agent: "agent (CoAX or CoXAM)",
-  ds_dataset: "dataset / trial configuration",
+  ds_dataset: "dataset",
+  apparatus: "apparatus & materials",
+  procedure: "experiment procedure",
+  user_model: "user model",
 };
 
-// Per-page chat: a fresh conversation, its own opening, and the only fields it may fill.
-const PAGE_CHAT: Record<string, { opening: string; focus: string; fields: string[] }> = {
-  overview: {
-    opening: "Let's start with the big picture. What's this experiment about — what are you hoping to test or explore? A rough direction is completely fine; we'll sharpen it together.",
-    focus: "the experiment overview — a short description of what's being studied",
-    fields: ["overview"],
-  },
+// Per-page chat focus + the fields the assistant may fill while on that page.
+const PAGE_CHAT: Record<string, { focus: string; fields: string[] }> = {
   rq: {
-    opening: "Now the research questions. What do you actually want to find out in this study? Even one core question is a great start.",
     focus: "the research question(s)",
     fields: ["rq"],
   },
   studydesign: {
-    opening: "Let's work out the study mechanics. To begin: what will you measure as your outcomes, and what's the model/framework you're studying (CoAX, CoXAM, or Sim2Real)?",
-    focus: "the dependent variable(s), the model/framework, control variables, counterbalancing, and number of participants. Note: the independent variables themselves (factor, levels, within/between) are added by the user in the panel on the left — guide them on what to pick, but you cannot set IVs yourself.",
-    fields: ["sd_dv", "sd_iv_agent", "sd_cv", "sd_balancing", "sd_participants"],
+    focus: "the model/framework, the dataset, and number of participants. Note: the variables (DV / IV / CV / RV) are added by the user as typed lists in the panel, and the user model is chosen on its own page — guide them, but you cannot set those yourself.",
+    fields: ["sd_iv_agent", "ds_dataset", "sd_participants"],
   },
-  dataset: {
-    opening: "Last piece: which agent will participants evaluate — CoAX or CoXAM — and how are the trials and datasets set up?",
-    focus: "the agent under evaluation and the dataset / trial configuration",
-    fields: ["ds_agent", "ds_dataset"],
+  apparatus: {
+    focus: "the apparatus and materials (devices, software/toolkit, what participants interact with)",
+    fields: ["apparatus"],
+  },
+  procedure: {
+    focus: "the step-by-step experiment procedure",
+    fields: ["procedure"],
+  },
+  usermodel: {
+    focus: "the user model — a cognitive model or ML proxy; the user picks one from the list (you cannot set it yourself, but help them choose)",
+    fields: [],
   },
   review: {
-    opening: "Here's your design coming together on the left. Want me to sanity-check anything — the sample size, the variables, or how it hangs together?",
     focus: "reviewing the overall design (there are no fields to fill on this page)",
     fields: [],
   },
 };
 
+const ALL_CONTENT_KEYS = ["rq", "sd_iv_agent", "sd_participants", "ds_dataset", "apparatus", "procedure", "user_model"];
+
 function buildChatContext(page: Page, a: Answers): string {
-  const cfg = PAGE_CHAT[page.id] ?? PAGE_CHAT.overview;
+  const cfg = PAGE_CHAT[page.id] ?? { focus: "", fields: [] as string[] };
   const snip = (k: string, n = 120) => {
     const v = (a[k] || "").trim();
     return v ? (v.length > n ? v.slice(0, n) + "…" : v) : "(empty)";
   };
-  const lines = cfg.fields.map((k) => `- ${k} (${FIELD_LABELS[k] ?? k}): ${snip(k)}`);
+
+  // Whole-design awareness: a compact view of every section.
+  const ivs = parseIvs(a);
+  const ivLine = ivs.length ? ivs.map((e, i) => `IV${i + 1} ${e.label || "?"}=${e.levels || "?"} [${e.alloc === "Between-subjects" ? "between" : "within"}${e.balancing ? ", " + e.balancing : ""}]`).join("; ") : "(none yet)";
+  const lines = ALL_CONTENT_KEYS.map((k) => `- ${FIELD_LABELS[k] ?? k}: ${snip(k)}`);
+  lines.splice(1, 0, `- dependent variables: ${dvSummary(parseDvs(a.sd_dv)) || "(empty)"}`);
+  lines.push(`- control variables (CV): ${varsSummary(parseVars(a.sd_cv)) || "(empty)"}`);
+  lines.push(`- random variables (RV): ${varsSummary(parseVars(a.sd_rv)) || "(empty)"}`);
+  lines.push(`- independent variables: ${ivLine}`);
+  const overview = lines.join("\n");
+
+  const fillable = cfg.fields.length ? cfg.fields.join(", ") : "(none — user-driven page)";
   const missing = cfg.fields.filter((k) => !(a[k] || "").trim());
-  const fillable = cfg.fields.length ? cfg.fields.join(", ") : "(none — this is a review page)";
-  const status = cfg.fields.length ? lines.join("\n") : "(no fields on this page)";
   const missingLine = cfg.fields.length === 0
-    ? "There are no fields to fill here; just help the user review."
+    ? "There are no fields for you to fill here; help the user with this section."
     : missing.length === 0
-      ? "All fields on this page are filled — tell the user this page looks complete and they can move on."
+      ? "All fields you can fill on this page are done — say it looks complete and they can move on."
       : `Still missing on this page: ${missing.map((k) => FIELD_LABELS[k] ?? k).join("; ")}. Ask about the next one or two.`;
+
   return [
+    `Whole design so far (all sections):\n${overview}`,
     `Current page: ${page.navTitle}`,
     `This page covers: ${cfg.focus}`,
-    `Fields you may fill on this page: ${fillable}`,
-    `Status of those fields:\n${status}`,
+    `Fields you may fill right now: ${fillable}`,
     missingLine,
   ].join("\n\n");
 }
@@ -799,8 +1272,7 @@ interface ChatMsg {
   content: string;
 }
 
-function ChatPanel({ opening, allowedFields, context, onApplyUpdates }: { opening: string; allowedFields: string[]; context: string; onApplyUpdates: (u: Record<string, string>) => void }) {
-  const [messages, setMessages] = useState<ChatMsg[]>([{ role: "assistant", content: opening }]);
+function ChatPanel({ messages, setMessages, allowedFields, context, onApplyUpdates }: { messages: ChatMsg[]; setMessages: React.Dispatch<React.SetStateAction<ChatMsg[]>>; allowedFields: string[]; context: string; onApplyUpdates: (u: Record<string, string>) => void }) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);

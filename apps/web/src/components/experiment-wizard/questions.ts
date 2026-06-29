@@ -4,7 +4,7 @@
 
 export type Answers = Record<string, string>;
 
-export type PageKind = "text" | "studydesign" | "dataset" | "review";
+export type PageKind = "text" | "studydesign" | "usermodel" | "review";
 
 export interface Page {
   id: string;
@@ -27,6 +27,38 @@ export const IV_OPTIONS = [
 ];
 
 export const AGENT_OPTIONS = ["CoAX", "CoXAM"];
+
+// ---- Datasets available to pick (plus user-uploaded CSVs at runtime) ----
+export const DATASET_OPTIONS = [
+  "Adult Income",
+  "Mushroom",
+  "Wine Quality",
+  "Forest Cover",
+  "Breast Cancer",
+  "Heart Disease",
+  "King County House",
+  "Pima Diabetes",
+  "Cardiotocography",
+];
+
+// ---- User models (cognitive models + ML proxies) ----
+// NOTE: full names / descriptions below are placeholders — please replace with the
+// authoritative text. Users can also add their own at runtime (stored locally).
+export interface UserModel {
+  id: string;
+  name: string;
+  full: string;
+  description: string;
+  category: string; // "Cognitive model" | "ML proxy" | "Custom"
+}
+
+export const USER_MODELS: UserModel[] = [
+  { id: "CoAX", name: "CoAX", full: "CoAX — full name TBC", description: "Cognitive user model (please add a 1–2 line description).", category: "Cognitive model" },
+  { id: "CoXAM", name: "CoXAM", full: "CoXAM — full name TBC", description: "Cognitive user model (please add a 1–2 line description).", category: "Cognitive model" },
+  // ML proxies — please confirm which to include and their descriptions:
+  { id: "MLP-proxy", name: "MLP proxy", full: "Multi-layer perceptron proxy user", description: "ML proxy user (placeholder — confirm).", category: "ML proxy" },
+  { id: "XGBoost-proxy", name: "XGBoost proxy", full: "Gradient-boosted trees proxy user", description: "ML proxy user (placeholder — confirm).", category: "ML proxy" },
+];
 
 export const DESIGN_TYPES = ["Within-subjects", "Between-subjects", "Mixed"] as const;
 
@@ -53,6 +85,8 @@ export interface IvFactor {
   id: string;
   label: string;
   kind: IvKind;
+  group?: string; // semantic grouping for the dropdown
+  def?: string; // one-line definition (shown as a tooltip / under the select)
   agents?: string[]; // available only for these models (default: all)
   levels?: string[]; // categorical, same across models
   levelsByAgent?: Record<string, string[]>;
@@ -62,11 +96,15 @@ export interface IvFactor {
   note?: string;
 }
 
+export const IV_GROUP_ORDER = ["Explanation (XAI)", "Data & Model", "User Model", "Task", "Custom"];
+
 export const IV_CATALOG: IvFactor[] = [
   {
     id: "xai_type",
-    label: "XAI type",
+    label: "XAI Type",
     kind: "categorical",
+    group: "Explanation (XAI)",
+    def: "The category/family of explanation shown to the user.",
     agents: ["CoAX", "CoXAM"],
     levelsByAgent: {
       CoAX: ["None", "Attribution", "Importance"],
@@ -75,20 +113,29 @@ export const IV_CATALOG: IvFactor[] = [
   },
   {
     id: "xai_method",
-    label: "XAI method",
+    label: "XAI Method",
     kind: "categorical",
+    group: "Explanation (XAI)",
+    def: "The specific algorithm used to generate the explanation.",
     agents: ["CoAX", "CoXAM"],
     levelsByAgent: {
-      CoAX: ["LIME", "SHAP", "Integrated gradients", "Input gradients (paper)", "Layer-wise Relevance Propagation", "Captum DeepLift"],
-      CoXAM: ["Decision tree", "Logistic regression weights (paper)", "Decision list", "Interpretable decision sets"],
+      CoAX: ["LIME", "SHAP", "Integrated Gradients", "Input Gradients (paper)", "Layer-wise Relevance Propagation", "Captum DeepLift"],
+      CoXAM: ["Decision Tree", "Logistic Regression Weights (paper)", "Decision List", "Interpretable Decision Sets"],
     },
   },
-  { id: "num_attributes", label: "Number of attributes", kind: "range", range: { min: 1, max: 10 } },
-  { id: "num_training", label: "Number of training instances", kind: "range", range: { min: 1, max: 14 }, note: "CoAX default 10; test set 18." },
+  { id: "faithfulness", label: "Faithfulness (XAI Fidelity)", kind: "range", group: "Explanation (XAI)", def: "How well the explanation reflects the AI's actual reasoning.", range: { min: 0, max: 100 }, note: "Usually controlled at 80%." },
+  { id: "robustness", label: "Robustness", kind: "binary", group: "Explanation (XAI)", def: "Whether the explanation stays stable under small input changes.", binary: ["Robust", "Not robust"] },
+  { id: "sparsity", label: "Sparsity", kind: "binary", group: "Explanation (XAI)", def: "Whether the explanation highlights few features (sparse) or many.", binary: ["Sparse", "Not sparse"] },
+  { id: "tested_xai", label: "Tested with XAI", kind: "binary", group: "Explanation (XAI)", def: "Whether a trial shows an explanation or not.", binary: ["With XAI", "Without XAI"], note: "Trial-level randomized, within-subjects." },
+
+  { id: "num_attributes", label: "Number of Attributes", kind: "range", group: "Data & Model", def: "How many input features are shown for each instance.", range: { min: 1, max: 10 } },
+  { id: "num_training", label: "Number of Training Instances", kind: "range", group: "Data & Model", def: "How many labelled examples are seen before testing.", range: { min: 1, max: 14 }, note: "CoAX default 10; test set 18." },
   {
     id: "dataset",
     label: "Dataset",
     kind: "categorical",
+    group: "Data & Model",
+    def: "Which dataset the task instances are drawn from.",
     levelsByAgent: {
       CoAX: ["Adult Income (CoAX only)", "Wine Quality", "Forest Cover"],
       CoXAM: ["Mushroom (CoXAM only)", "Wine Quality", "Forest Cover"],
@@ -96,15 +143,14 @@ export const IV_CATALOG: IvFactor[] = [
     },
     note: "Untested: Breast Cancer, Heart Disease, King County House, Pima Diabetes, Cardiotocography.",
   },
-  { id: "faithfulness", label: "Faithfulness (XAI fidelity)", kind: "range", range: { min: 0, max: 100 }, note: "Usually controlled at 80%." },
-  { id: "robustness", label: "Robustness", kind: "binary", binary: ["Robust", "Not robust"] },
-  { id: "sparsity", label: "Sparsity", kind: "binary", binary: ["Sparse", "Not sparse"] },
-  { id: "ai_model", label: "AI model", kind: "categorical", levels: ["MLP", "XGBoost"], note: "Usually controlled by dataset." },
-  { id: "tested_xai", label: "Tested with XAI", kind: "binary", binary: ["With XAI", "Without XAI"], note: "Trial-level randomized, within-subjects." },
+  { id: "ai_model", label: "AI Model", kind: "categorical", group: "Data & Model", def: "The underlying predictive model being explained.", levels: ["MLP", "XGBoost"], note: "Usually controlled by dataset." },
+
   {
     id: "cognitive",
-    label: "Cognitive parameters",
+    label: "Cognitive Parameters",
     kind: "cognitive",
+    group: "User Model",
+    def: "Parameters of the cognitive user model (memory, attention, etc.).",
     cognitiveByAgent: {
       CoAX: [
         { name: "Retrieval Threshold", min: -2.3, max: -1.5, note: "Memory capacity; higher = harder retrieval / more forgetting." },
@@ -114,19 +160,22 @@ export const IV_CATALOG: IvFactor[] = [
       ],
       CoXAM: [
         { name: "Retrieval Threshold", min: -2.8, max: -1.5, note: "How easily info is retrieved from memory." },
-        { name: "Opportunity Cost", min: 0, max: 10, note: "Accuracy–time tradeoff (computational rationality / RL)." },
+        { name: "Opportunity Cost", min: 0, max: 10, note: "Accuracy-time tradeoff (computational rationality / RL)." },
         { name: "Diffusion Noise", min: 0, max: 1, note: "Stochasticity during forward simulation." },
         { name: "Counterfactual Margin", min: 0, max: 1, note: "Margin when evaluating counterfactual changes." },
       ],
       Sim2Real: [
-        { name: "Memory / cognitive budget", min: 0, max: 0, note: "Top-2 features vs all features (≈ CoAX Attended Features)." },
+        { name: "Memory / cognitive budget", min: 0, max: 0, note: "Top-2 features vs all features." },
       ],
     },
   },
+
   {
     id: "user_task",
-    label: "User task",
+    label: "User Task",
     kind: "categorical",
+    group: "Task",
+    def: "What the user is asked to do (e.g. forward vs counterfactual simulation).",
     levelsByAgent: {
       CoAX: ["Forward simulation"],
       CoXAM: ["Forward simulation", "Counterfactual simulation"],
@@ -145,6 +194,97 @@ export function ivLevelsFor(f: IvFactor, agent: string): string[] {
   return f.levels ?? [];
 }
 
+// ---- DV / CV / RV variables, each with a user-defined (custom) type ----
+export interface Variable {
+  name: string;
+  type: string; // fully custom / user-defined
+}
+
+export function parseVars(raw: string | undefined): Variable[] {
+  const s = (raw || "").trim();
+  if (!s) return [];
+  try {
+    const arr = JSON.parse(s);
+    if (Array.isArray(arr)) return arr as Variable[];
+  } catch {
+    /* legacy free text */
+  }
+  return [{ name: s, type: "" }];
+}
+
+export function varsSummary(vs: Variable[]): string {
+  return vs
+    .filter((v) => (v.name || "").trim())
+    .map((v) => ((v.type || "").trim() ? `${v.name} (${v.type})` : v.name))
+    .join(", ");
+}
+
+// ---- Dependent variables: a catalog of measures + custom (user-supplied formula) ----
+export interface DvMeasure {
+  id: string;
+  label: string;
+  group: string;
+  def: string;
+}
+
+export const DV_GROUP_ORDER = ["Behavioural", "Subjective", "Understanding", "Custom"];
+
+// NOTE: this list is a sensible default — edit to match what the toolkit actually computes.
+export const DV_CATALOG: DvMeasure[] = [
+  { id: "task_accuracy", label: "Task Accuracy", group: "Behavioural", def: "Proportion of correct decisions." },
+  { id: "decision_time", label: "Decision Time", group: "Behavioural", def: "Time taken per decision (seconds)." },
+  { id: "appropriate_reliance", label: "Appropriate Reliance", group: "Behavioural", def: "Following the AI when it's right, overriding when it's wrong." },
+  { id: "agreement_rate", label: "Agreement Rate", group: "Behavioural", def: "How often the user agrees with the AI." },
+  { id: "trust", label: "Trust", group: "Subjective", def: "Self-reported trust (e.g. Likert)." },
+  { id: "confidence", label: "Confidence", group: "Subjective", def: "Self-reported confidence in decisions." },
+  { id: "workload", label: "Mental Workload (NASA-TLX)", group: "Subjective", def: "Perceived cognitive load." },
+  { id: "satisfaction", label: "Satisfaction / Preference", group: "Subjective", def: "Self-reported satisfaction or preference." },
+  { id: "forward_sim", label: "Forward-Simulation Accuracy", group: "Understanding", def: "How well the user predicts the AI's output." },
+  { id: "counterfactual_sim", label: "Counterfactual-Simulation Accuracy", group: "Understanding", def: "Predicting the AI's output under changes." },
+  { id: "comprehension", label: "Comprehension Score", group: "Understanding", def: "Objective measure of understanding." },
+];
+
+export interface DvEntry {
+  measure: string; // DV_CATALOG id, or "custom"
+  name: string; // display name (auto for catalog, user-typed for custom)
+  formula?: string; // precise calculation (required for custom; optional override otherwise)
+  unit?: string;
+}
+
+export function dvLabel(id: string): string {
+  return DV_CATALOG.find((d) => d.id === id)?.label ?? "";
+}
+
+export function parseDvs(raw: string | undefined): DvEntry[] {
+  const s = (raw || "").trim();
+  if (!s) return [];
+  try {
+    const arr = JSON.parse(s);
+    if (Array.isArray(arr)) {
+      return arr.map((e: any) => {
+        if (e && typeof e === "object" && "measure" in e) return e as DvEntry;
+        // legacy Variable {name,type} → custom DV
+        if (e && typeof e === "object" && "name" in e) return { measure: "custom", name: e.name, formula: "", unit: e.type } as DvEntry;
+        return { measure: "custom", name: String(e), formula: "" } as DvEntry;
+      });
+    }
+  } catch {
+    /* legacy free text */
+  }
+  return [{ measure: "custom", name: s, formula: "" }];
+}
+
+export function dvDisplayName(e: DvEntry): string {
+  return e.measure === "custom" ? (e.name || "") : (dvLabel(e.measure) || e.name || "");
+}
+
+export function dvSummary(dvs: DvEntry[]): string {
+  return dvs
+    .map((e) => dvDisplayName(e))
+    .filter((n) => n.trim())
+    .join(", ");
+}
+
 // ---- Multiple IVs (factorial), each with its own within/between allocation ----
 export const ALLOC_OPTIONS = ["Within-subjects", "Between-subjects"] as const;
 
@@ -156,6 +296,7 @@ export interface IvEntry {
   min?: string;
   max?: string;
   alloc: string; // "Within-subjects" | "Between-subjects"
+  balancing?: string; // counterbalancing for THIS IV (only meaningful for within-subjects)
 }
 
 export function parseIvs(a: Answers): IvEntry[] {
@@ -194,21 +335,12 @@ export function designDescriptor(ivs: IvEntry[]): string {
 
 export const PAGES: Page[] = [
   {
-    id: "overview",
-    navTitle: "Overview",
-    section: "Getting started",
-    kind: "text",
-    prompt: "What experiment do you want to test on?",
-    placeholder: "e.g. I want to compare two XAI explanation styles and see how each affects users' trust calibration…",
-    required: true,
-  },
-  {
     id: "rq",
     navTitle: "Research Questions",
     section: "Section 1",
     kind: "text",
     prompt: "What are your research questions?",
-    hints: ["List them as RQ1, RQ2, RQ3…", "Each should be clear and testable."],
+    hints: ["A rough direction is fine to start — the assistant can help shape it.", "List them as RQ1, RQ2, RQ3…", "Each should be clear and testable."],
     placeholder: "RQ1: …\nRQ2: …",
     required: true,
   },
@@ -220,10 +352,28 @@ export const PAGES: Page[] = [
     required: true,
   },
   {
-    id: "dataset",
-    navTitle: "Dataset & Agent",
+    id: "apparatus",
+    navTitle: "Apparatus",
     section: "Section 3",
-    kind: "dataset",
+    kind: "text",
+    prompt: "What apparatus and materials will you use?",
+    hints: ["Devices, displays, sensors, input methods.", "Software / toolkit / custom interface.", "Anything participants interact with."],
+    placeholder: "e.g. 14-inch laptop, the XAI toolkit web app, mouse + keyboard, screen recording…",
+  },
+  {
+    id: "procedure",
+    navTitle: "Procedure",
+    section: "Section 4",
+    kind: "text",
+    prompt: "Walk through the experiment procedure.",
+    hints: ["Step by step: welcome, consent, training, blocks/trials, breaks, debrief.", "Note timing and what participants do at each step."],
+    placeholder: "1. Consent & demographics\n2. Training trials\n3. Main blocks (counterbalanced)\n4. Post-task questionnaire\n5. Debrief",
+  },
+  {
+    id: "usermodel",
+    navTitle: "User Model",
+    section: "Section 5",
+    kind: "usermodel",
     required: true,
   },
   {
@@ -241,9 +391,10 @@ export function isPageComplete(page: Page, a: Answers): boolean {
   if (page.kind === "studydesign") {
     const ivs = parseIvs(a);
     const ivOk = ivs.length > 0 && ivs.every((e) => e.factor && (e.levels || "").trim());
-    return has("sd_dv") && ivOk && has("sd_cv") && has("sd_participants");
+    const dvOk = parseDvs(a.sd_dv).some((e) => dvDisplayName(e).trim());
+    return dvOk && ivOk && has("sd_participants");
   }
-  if (page.kind === "dataset") return has("ds_agent");
+  if (page.kind === "usermodel") return has("user_model");
   return true; // review or unknown
 }
 
@@ -252,38 +403,19 @@ export function validateParticipants(
   a: Answers
 ): { level: "ok" | "warn" | "info"; message: string } | null {
   const ivs = parseIvs(a);
-  const n = parseInt(a.sd_participants || "", 10);
+  const per = parseInt(a.sd_participants || "", 10);
   if (!ivs.length || !a.sd_participants) return null;
-  if (!Number.isFinite(n) || n <= 0) return { level: "warn", message: "Enter the total number of participants as a number." };
+  if (!Number.isFinite(per) || per <= 0) return { level: "warn", message: "Enter participants per condition as a number." };
 
   const cells = totalCells(ivs);
   const between = betweenCells(ivs);
+  const total = per * between;
   const hasWithin = ivs.some((e) => e.alloc === "Within-subjects");
-  const balancing = a.sd_balancing;
 
-  // Participants are divided across between-subjects cells only.
   if (between > 1) {
-    if (n < between) return { level: "warn", message: `${between} between-subjects cell(s) need at least ${between} participants (one per group) — ${n} is too few.` };
-    if (n % between !== 0) return { level: "warn", message: `${n} doesn't divide evenly into ${between} between-subjects cell(s) → unequal groups. Nearest: ${Math.floor(n / between) * between} or ${Math.ceil(n / between) * between}.` };
-    const per = n / between;
-    return { level: "ok", message: `${n} participants ÷ ${between} between-subjects cell(s) = ${per} each${hasWithin ? `, each seeing all within-subjects levels (design has ${cells} cell(s) total).` : ` (design has ${cells} cell(s) total).`} ✓` };
+    return { level: "ok", message: `${per} per condition × ${between} between-subjects group(s) = ${total} participants${hasWithin ? ", each also completing all within-subjects cells" : ""} (design has ${cells} cell(s) total).` };
   }
-
-  // Fully within-subjects (or a single factor): everyone sees all cells.
-  if (hasWithin) {
-    if (balancing === "Full counterbalancing" && cells > 1) {
-      const orders = factorial(cells);
-      if (n % orders !== 0) return { level: "warn", message: `Full counterbalancing of ${cells} within-subjects cell(s) = ${orders} orders. For balance, N should be a multiple of ${orders} (you have ${n}).` };
-      return { level: "ok", message: `Within-subjects, full counterbalancing: ${n} ÷ ${orders} orders = ${n / orders} per order. ✓` };
-    }
-    if (balancing === "Latin square" && cells > 1) {
-      if (n % cells !== 0) return { level: "warn", message: `A Latin square for ${cells} cell(s) has ${cells} sequences. For balance, N should be a multiple of ${cells} (you have ${n}).` };
-      return { level: "ok", message: `Within-subjects, Latin square: ${n} ÷ ${cells} sequences = ${n / cells} per sequence. ✓` };
-    }
-    return { level: "ok", message: `Within-subjects: each of ${n} participants sees all ${cells} cell(s).${cells > 1 && !balancing ? " Consider counterbalancing to control order effects." : " ✓"}` };
-  }
-
-  return { level: "ok", message: `${n} participants across ${cells} cell(s). ✓` };
+  return { level: "ok", message: `${per} participants, each completing all ${cells} cell(s) = ${total} total.` };
 }
 
 function factorial(k: number): number {
