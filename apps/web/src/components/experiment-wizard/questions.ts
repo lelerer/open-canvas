@@ -4,7 +4,7 @@
 
 export type Answers = Record<string, string>;
 
-export type PageKind = "text" | "studydesign" | "usermodel" | "review";
+export type PageKind = "text" | "studydesign" | "apparatus" | "procedure" | "usermodel" | "review";
 
 export interface Page {
   id: string;
@@ -333,6 +333,137 @@ export function designDescriptor(ivs: IvEntry[]): string {
   return allocs.has("Between-subjects") ? "between-subjects" : "within-subjects";
 }
 
+// ---- Build IvEntry objects from loose chat specs (so the assistant can fill IVs) ----
+export function findIvFactor(idOrLabel: string): IvFactor | null {
+  const q = (idOrLabel || "").trim().toLowerCase();
+  if (!q) return null;
+  return (
+    IV_CATALOG.find((f) => f.id.toLowerCase() === q || f.label.toLowerCase() === q) ||
+    // looser contains-match as a fallback (e.g. "method" → "XAI Method")
+    IV_CATALOG.find((f) => f.label.toLowerCase().includes(q) || q.includes(f.label.toLowerCase())) ||
+    null
+  );
+}
+
+// A spec looks like: { factor, levels?, min?, max?, cogParam?, alloc?, balancing? }
+export function ivEntryFromSpec(spec: any, agent: string): IvEntry | null {
+  if (!spec || typeof spec !== "object") return null;
+  const alloc = ALLOC_OPTIONS.includes(spec.alloc) ? spec.alloc : "Within-subjects";
+  const balancing = alloc === "Within-subjects" && typeof spec.balancing === "string" ? spec.balancing : "";
+  const f = findIvFactor(spec.factor || spec.label || spec.id || "");
+
+  // Unknown factor → custom categorical from the provided levels.
+  if (!f) {
+    const name = String(spec.factor || spec.label || "").trim();
+    if (!name) return null;
+    const lvls = Array.isArray(spec.levels) ? spec.levels.map((x: any) => String(x).trim()).filter(Boolean) : [];
+    return { factor: `custom:${name}`, label: name, levels: lvls.join(" | "), alloc, balancing };
+  }
+
+  if (f.kind === "binary" && f.binary) {
+    return { factor: f.id, label: f.label, levels: `${f.binary[0]} vs ${f.binary[1]}`, alloc, balancing };
+  }
+
+  if (f.kind === "range") {
+    const arr = Array.isArray(spec.levels) ? spec.levels : [];
+    const min = spec.min ?? arr[0];
+    const max = spec.max ?? arr[1];
+    const minS = min != null && min !== "" ? String(min) : "";
+    const maxS = max != null && max !== "" ? String(max) : "";
+    const levels = minS || maxS ? `${minS || "?"}\u2013${maxS || "?"}` : "";
+    return { factor: f.id, label: f.label, levels, min: minS, max: maxS, alloc, balancing };
+  }
+
+  if (f.kind === "cognitive") {
+    const params = (f.cognitiveByAgent && f.cognitiveByAgent[agent]) || [];
+    const wanted = String(spec.cogParam || spec.param || "").trim().toLowerCase();
+    const cp = params.find((p) => p.name.toLowerCase() === wanted) || params.find((p) => p.name.toLowerCase().includes(wanted) && wanted) || null;
+    const cogParam = cp ? cp.name : "";
+    const min = spec.min ?? "";
+    const max = spec.max ?? "";
+    const minS = min !== "" && min != null ? String(min) : "";
+    const maxS = max !== "" && max != null ? String(max) : "";
+    const levels = minS || maxS ? `${minS || "?"}\u2013${maxS || "?"}` : "";
+    return { factor: f.id, label: cogParam ? `Cognitive: ${cogParam}` : f.label, levels, cogParam, min: minS, max: maxS, alloc, balancing };
+  }
+
+  // categorical: keep only valid levels (normalising case), else fall back to provided.
+  const valid = ivLevelsFor(f, agent);
+  const provided = Array.isArray(spec.levels) ? spec.levels.map((x: any) => String(x).trim()).filter(Boolean) : [];
+  const matched = provided
+    .map((l) => valid.find((v) => v.toLowerCase() === l.toLowerCase()) || null)
+    .filter((v): v is string => !!v);
+  const use = matched.length ? matched : provided;
+  return { factor: f.id, label: f.label, levels: use.join(" | "), alloc, balancing };
+}
+
+export function normalizeIvSpecs(specs: any, agent: string): IvEntry[] {
+  if (!Array.isArray(specs)) return [];
+  return specs.map((s) => ivEntryFromSpec(s, agent)).filter((e): e is IvEntry => !!e);
+}
+
+// DV specs from chat: { measure?: catalog id/label or "custom", name?, formula?, unit? }
+export function normalizeDvSpecs(specs: any): DvEntry[] {
+  if (!Array.isArray(specs)) return [];
+  return specs
+    .map((s): DvEntry | null => {
+      if (typeof s === "string") {
+        const n = s.trim();
+        return n ? { measure: "custom", name: n, formula: "" } : null;
+      }
+      if (!s || typeof s !== "object") return null;
+      const key = String(s.measure ?? s.id ?? "").trim().toLowerCase();
+      const cat = DV_CATALOG.find((d) => d.id.toLowerCase() === key || d.label.toLowerCase() === key);
+      if (cat) return { measure: cat.id, name: "", formula: String(s.formula ?? "") };
+      // also try matching by name against catalog
+      const nameKey = String(s.name ?? "").trim().toLowerCase();
+      const catByName = DV_CATALOG.find((d) => d.label.toLowerCase() === nameKey);
+      if (catByName && !s.formula) return { measure: catByName.id, name: "", formula: "" };
+      const name = String(s.name ?? s.measure ?? "").trim();
+      if (!name && !String(s.formula ?? "").trim()) return null;
+      return { measure: "custom", name, formula: String(s.formula ?? ""), unit: s.unit ? String(s.unit) : undefined };
+    })
+    .filter((e): e is DvEntry => !!e);
+}
+
+// CV / RV specs from chat: { name, type? } | "name"
+export function normalizeVarSpecs(specs: any): Variable[] {
+  if (!Array.isArray(specs)) return [];
+  return specs
+    .map((s): Variable | null => {
+      if (typeof s === "string") {
+        const n = s.trim();
+        return n ? { name: n, type: "" } : null;
+      }
+      if (!s || typeof s !== "object") return null;
+      const name = String(s.name ?? "").trim();
+      if (!name) return null;
+      return { name, type: String(s.type ?? "").trim() };
+    })
+    .filter((v): v is Variable => !!v);
+}
+
+// Procedure step specs from chat: { title, note?, link?, attachment? } | "title"
+export function normalizeProcSpecs(specs: any): ProcStep[] {
+  if (!Array.isArray(specs)) return [];
+  return specs
+    .map((s): ProcStep | null => {
+      if (typeof s === "string") {
+        const t = s.trim();
+        return t ? { title: t } : null;
+      }
+      if (!s || typeof s !== "object") return null;
+      const title = String(s.title ?? "").trim();
+      if (!title) return null;
+      const out: ProcStep = { title };
+      if (s.note) out.note = String(s.note);
+      if (s.link) out.link = String(s.link);
+      if (s.attachment) out.attachment = String(s.attachment);
+      return out;
+    })
+    .filter((p): p is ProcStep => !!p);
+}
+
 export const PAGES: Page[] = [
   {
     id: "rq",
@@ -355,19 +486,17 @@ export const PAGES: Page[] = [
     id: "apparatus",
     navTitle: "Apparatus",
     section: "Section 3",
-    kind: "text",
+    kind: "apparatus",
     prompt: "What apparatus and materials will you use?",
-    hints: ["Devices, displays, sensors, input methods.", "Software / toolkit / custom interface.", "Anything participants interact with."],
-    placeholder: "e.g. 14-inch laptop, the XAI toolkit web app, mouse + keyboard, screen recording…",
+    hints: ["Devices, displays, software / toolkit.", "Paste a link to your study / formative-study build to preview it here."],
   },
   {
     id: "procedure",
     navTitle: "Procedure",
     section: "Section 4",
-    kind: "text",
-    prompt: "Walk through the experiment procedure.",
-    hints: ["Step by step: welcome, consent, training, blocks/trials, breaks, debrief.", "Note timing and what participants do at each step."],
-    placeholder: "1. Consent & demographics\n2. Training trials\n3. Main blocks (counterbalanced)\n4. Post-task questionnaire\n5. Debrief",
+    kind: "procedure",
+    prompt: "Build the procedure, step by step.",
+    hints: ["Each step is one thing the participant does.", "Attach a consent form or questionnaire to a step if needed."],
   },
   {
     id: "usermodel",
@@ -394,8 +523,43 @@ export function isPageComplete(page: Page, a: Answers): boolean {
     const dvOk = parseDvs(a.sd_dv).some((e) => dvDisplayName(e).trim());
     return dvOk && ivOk && has("sd_participants");
   }
+  if (page.kind === "apparatus") return has("apparatus") || has("apparatus_url");
+  if (page.kind === "procedure") return parseProcSteps(a.proc_steps).some((s) => (s.title || "").trim());
   if (page.kind === "usermodel") return has("user_model");
   return true; // review or unknown
+}
+
+// ---- Procedure: ordered steps, each optionally carrying an attachment ----
+// Suggested step titles (the title field is a combobox: pick one or type your own).
+export const PROC_STEP_TYPES = ["Welcome & consent", "Demographics questionnaire", "Training / practice", "Main task", "Post-task questionnaire", "Break", "Debrief"];
+
+export interface ProcStep {
+  title: string;
+  attachment?: string; // uploaded file name (consent form, questionnaire, …)
+  link?: string; // or an external link
+  note?: string;
+}
+
+export function parseProcSteps(raw: string | undefined): ProcStep[] {
+  const s = (raw || "").trim();
+  if (!s) return [];
+  try {
+    const arr = JSON.parse(s);
+    if (Array.isArray(arr)) return arr as ProcStep[];
+  } catch {
+    /* legacy free text → one step per non-empty line */
+    return s.split("\n").map((l) => l.replace(/^\s*\d+[.)]\s*/, "").trim()).filter(Boolean).map((title) => ({ title }));
+  }
+  return [];
+}
+
+export function procStepsSummary(steps: ProcStep[]): string[] {
+  return steps
+    .filter((s) => (s.title || "").trim())
+    .map((s, i) => {
+      const bits = [s.title, (s.note || "").trim() ? `— ${s.note}` : "", s.attachment ? `(file: ${s.attachment})` : "", s.link ? `(link: ${s.link})` : ""].filter(Boolean);
+      return `${i + 1}. ${bits.join(" ")}`;
+    });
 }
 
 // ---- Participant-vs-design sanity check ----

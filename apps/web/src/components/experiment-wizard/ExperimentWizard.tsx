@@ -29,7 +29,6 @@ import {
   DATASET_OPTIONS,
   USER_MODELS,
   UserModel,
-  IV_AGENTS,
   IV_CATALOG,
   IV_GROUP_ORDER,
   IvFactor,
@@ -38,6 +37,10 @@ import {
   ALLOC_OPTIONS,
   IvEntry,
   parseIvs,
+  normalizeIvSpecs,
+  normalizeDvSpecs,
+  normalizeVarSpecs,
+  normalizeProcSpecs,
   totalCells,
   betweenCells,
   designDescriptor,
@@ -50,11 +53,17 @@ import {
   parseDvs,
   dvSummary,
   dvDisplayName,
+  ProcStep,
+  parseProcSteps,
+  procStepsSummary,
+  PROC_STEP_TYPES,
 } from "./questions";
 
 const STORAGE_KEY = "experiment-interview-v1";
 const ACCENT = "#359793";
 const SERIF = 'Georgia, Cambria, "Times New Roman", serif';
+// Common variable types suggested for CV / RV (the field still accepts custom text).
+const COMMON_VAR_TYPES = ["Numerical (continuous)", "Numerical (discrete)", "Categorical (nominal)", "Ordinal", "Binary", "Count", "Boolean", "Text / free response"];
 const LAST = PAGES.length - 1;
 
 const GLOBAL_OPENING =
@@ -86,8 +95,33 @@ export function ExperimentWizard() {
   function setAnswer(id: string, v: string) {
     setAnswers((a) => ({ ...a, [id]: v }));
   }
-  function applyUpdates(updates: Record<string, string>) {
-    setAnswers((a) => ({ ...a, ...updates }));
+  function applyUpdates(payload: ApplyPayload) {
+    const { updates, ops } = payload;
+    setAnswers((a) => {
+      let next: Answers = { ...a };
+      const STRUCTURED = new Set(["sd_ivs", "sd_dv", "sd_cv", "sd_rv", "proc_steps"]);
+      for (const [k, v] of Object.entries(updates)) {
+        if (STRUCTURED.has(k)) continue; // handled below
+        next[k] = v;
+      }
+      const parseArr = (s: string): any => { try { return JSON.parse(s); } catch { return null; } };
+      // Full-list replacement (only if the model sends a whole array).
+      if (updates.sd_ivs != null) {
+        const specs = parseArr(updates.sd_ivs);
+        if (specs) {
+          const norm = normalizeIvSpecs(specs, ivAgentOf(next));
+          next.sd_ivs = JSON.stringify(norm);
+          next.sd_conditions = String(totalCells(norm));
+        }
+      }
+      if (updates.sd_dv != null) { const s = parseArr(updates.sd_dv); if (s) next.sd_dv = JSON.stringify(normalizeDvSpecs(s)); }
+      if (updates.sd_cv != null) { const s = parseArr(updates.sd_cv); if (s) next.sd_cv = JSON.stringify(normalizeVarSpecs(s)); }
+      if (updates.sd_rv != null) { const s = parseArr(updates.sd_rv); if (s) next.sd_rv = JSON.stringify(normalizeVarSpecs(s)); }
+      if (updates.proc_steps != null) { const s = parseArr(updates.proc_steps); if (s) next.proc_steps = JSON.stringify(normalizeProcSpecs(s)); }
+      // Incremental ops (preferred for edits).
+      for (const op of ops) next = applyOneOp(next, op);
+      return next;
+    });
   }
 
   return (
@@ -144,6 +178,10 @@ export function ExperimentWizard() {
                 <TextBody page={page} answers={answers} setAnswer={setAnswer} />
               ) : page.kind === "studydesign" ? (
                 <StudyDesignBody answers={answers} setAnswer={setAnswer} />
+              ) : page.kind === "apparatus" ? (
+                <ApparatusBody page={page} answers={answers} setAnswer={setAnswer} />
+              ) : page.kind === "procedure" ? (
+                <ProcedureBody page={page} answers={answers} setAnswer={setAnswer} />
               ) : (
                 <UserModelBody answers={answers} setAnswer={setAnswer} />
               )}
@@ -176,7 +214,7 @@ export function ExperimentWizard() {
         <ChatPanel
           messages={messages}
           setMessages={setMessages}
-          allowedFields={(PAGE_CHAT[page.id] ?? { fields: [] }).fields}
+          allowedFields={ALL_FILLABLE}
           context={buildChatContext(page, answers)}
           onApplyUpdates={applyUpdates}
         />
@@ -209,6 +247,161 @@ function TextBody({ page, answers, setAnswer }: { page: Page; answers: Answers; 
         className="mt-6 min-h-[220px] resize-y bg-white text-[15px] leading-relaxed"
       />
       <p className="mt-2 text-xs text-neutral-400">Type directly here, or use the assistant on the right to fill it in.</p>
+    </>
+  );
+}
+
+function ApparatusBody({ page, answers, setAnswer }: { page: Page; answers: Answers; setAnswer: (id: string, v: string) => void }) {
+  const a = answers;
+  const url = (a.apparatus_url || "").trim();
+  const safe = /^https?:\/\//i.test(url);
+  return (
+    <>
+      <h1 className="text-2xl font-semibold leading-snug tracking-tight">{page.prompt}</h1>
+      {page.hints && page.hints.length > 0 && (
+        <ul className="mt-3 space-y-1">
+          {page.hints.map((h, i) => (
+            <li key={i} className="flex gap-2 text-sm text-neutral-500"><span style={{ color: ACCENT }}>•</span><span>{h}</span></li>
+          ))}
+        </ul>
+      )}
+
+      <div className="mt-6 space-y-5" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+        <div>
+          <DocLabel>Description</DocLabel>
+          <Textarea value={a.apparatus ?? ""} onChange={(e) => setAnswer("apparatus", e.target.value)} placeholder="Devices, displays, software / toolkit, what participants interact with…" className="mt-1 min-h-[120px] resize-y bg-white text-[15px] leading-relaxed" />
+        </div>
+
+        <div>
+          <DocLabel>Study / apparatus link (HTML)</DocLabel>
+          <div className="mt-1 flex items-center gap-2">
+            <input
+              value={a.apparatus_url ?? ""}
+              onChange={(e) => setAnswer("apparatus_url", e.target.value)}
+              placeholder="https://your-study-build.example.com"
+              className="flex-1 rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-400"
+            />
+            {safe ? (
+              <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-50">
+                Open ↗
+              </a>
+            ) : null}
+          </div>
+          {url && !safe ? <p className="mt-1 text-xs text-amber-600">Enter a full URL starting with http:// or https://</p> : null}
+        </div>
+
+        {safe ? (
+          <div>
+            <DocLabel>Preview</DocLabel>
+            <div className="mt-1 overflow-hidden rounded-lg border border-neutral-200 bg-white">
+              <iframe src={url} title="Apparatus preview" className="h-[420px] w-full" sandbox="allow-scripts allow-same-origin allow-forms" />
+            </div>
+            <p className="mt-1 text-xs text-neutral-400">Some sites block embedding (X-Frame-Options / CSP). If it stays blank, use “Open ↗”.</p>
+          </div>
+        ) : null}
+      </div>
+    </>
+  );
+}
+
+function ProcedureBody({ page, answers, setAnswer }: { page: Page; answers: Answers; setAnswer: (id: string, v: string) => void }) {
+  const a = answers;
+  const steps = parseProcSteps(a.proc_steps);
+  const [linkOpen, setLinkOpen] = useState<Record<number, boolean>>({});
+
+  function save(next: ProcStep[]) { setAnswer("proc_steps", JSON.stringify(next)); }
+  function add() { save([...steps, { title: "" }]); }
+  function remove(i: number) { save(steps.filter((_, idx) => idx !== i)); }
+  function patch(i: number, p: Partial<ProcStep>) { save(steps.map((s, idx) => (idx === i ? { ...s, ...p } : s))); }
+  function move(i: number, dir: -1 | 1) {
+    const j = i + dir;
+    if (j < 0 || j >= steps.length) return;
+    const next = steps.slice();
+    [next[i], next[j]] = [next[j], next[i]];
+    save(next);
+  }
+  function onFile(i: number, e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) patch(i, { attachment: file.name });
+    e.target.value = "";
+  }
+
+  const inputCls = "w-full border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none placeholder:text-neutral-300 focus:border-neutral-500";
+
+  return (
+    <>
+      <h1 className="text-2xl font-semibold leading-snug tracking-tight">{page.prompt}</h1>
+      {page.hints && page.hints.length > 0 && (
+        <ul className="mt-3 space-y-1">
+          {page.hints.map((h, i) => (
+            <li key={i} className="flex gap-2 text-sm text-neutral-500"><span style={{ color: ACCENT }}>•</span><span>{h}</span></li>
+          ))}
+        </ul>
+      )}
+
+      <div className="mt-5 space-y-3" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+        {steps.length === 0 ? <p className="text-sm text-neutral-400">No steps yet — add the first one below.</p> : null}
+
+        {steps.map((s, i) => (
+          <div key={i} className="rounded-lg border border-neutral-200 bg-white p-3">
+            <div className="flex items-start gap-3">
+              <span className="mt-1 grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-semibold text-white" style={{ backgroundColor: ACCENT }}>{i + 1}</span>
+              <div className="min-w-0 flex-1">
+                <input
+                  value={s.title}
+                  onChange={(e) => patch(i, { title: e.target.value })}
+                  list="proc-step-titles"
+                  placeholder="Step title — pick one or type your own"
+                  className={inputCls}
+                />
+                <textarea
+                  value={s.note ?? ""}
+                  onChange={(e) => patch(i, { note: e.target.value })}
+                  placeholder="Add more details about this step… (optional)"
+                  rows={2}
+                  className="mt-2 w-full resize-y rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm leading-relaxed outline-none placeholder:text-neutral-300 focus:border-neutral-400"
+                />
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-dashed border-neutral-300 px-2 py-1 text-xs font-medium text-neutral-600 hover:bg-neutral-50">
+                    <Upload className="h-3.5 w-3.5" /> {s.attachment ? s.attachment : "Attach file"}
+                    <input type="file" onChange={(e) => onFile(i, e)} className="hidden" />
+                  </label>
+                  {s.attachment ? <button onClick={() => patch(i, { attachment: "" })} className="text-xs text-neutral-400 underline hover:text-neutral-600">clear file</button> : null}
+                  {!(linkOpen[i] || (s.link || "").trim()) ? (
+                    <button onClick={() => setLinkOpen((o) => ({ ...o, [i]: true }))} className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: ACCENT }}>
+                      <Plus className="h-3.5 w-3.5" /> Add link
+                    </button>
+                  ) : null}
+                </div>
+                {linkOpen[i] || (s.link || "").trim() ? (
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      value={s.link ?? ""}
+                      onChange={(e) => patch(i, { link: e.target.value })}
+                      placeholder="Link (consent form / questionnaire URL)"
+                      className={cn(inputCls, "text-sm")}
+                    />
+                    <button onClick={() => { patch(i, { link: "" }); setLinkOpen((o) => ({ ...o, [i]: false })); }} className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600" aria-label="Remove link"><X className="h-3.5 w-3.5" /></button>
+                  </div>
+                ) : null}
+              </div>
+              <div className="flex flex-col items-center gap-1">
+                <button onClick={() => move(i, -1)} disabled={i === 0} className="rounded p-0.5 text-neutral-400 enabled:hover:bg-neutral-100 disabled:opacity-30" aria-label="Move up"><ChevronLeft className="h-4 w-4 rotate-90" /></button>
+                <button onClick={() => move(i, 1)} disabled={i === steps.length - 1} className="rounded p-0.5 text-neutral-400 enabled:hover:bg-neutral-100 disabled:opacity-30" aria-label="Move down"><ChevronRight className="h-4 w-4 rotate-90" /></button>
+                <button onClick={() => remove(i)} className="rounded p-0.5 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600" aria-label="Remove step"><X className="h-4 w-4" /></button>
+              </div>
+            </div>
+          </div>
+        ))}
+
+        <datalist id="proc-step-titles">
+          {PROC_STEP_TYPES.map((t) => (<option key={t} value={t} />))}
+        </datalist>
+
+        <button type="button" onClick={add} className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:bg-neutral-50">
+          <Plus className="h-4 w-4" /> Add step
+        </button>
+      </div>
     </>
   );
 }
@@ -457,12 +650,13 @@ function VariableList({ valueKey, answers, setAnswer, namePlaceholder }: { value
   }
 
   const listId = `vartypes-${valueKey}`;
+  const typeOptions = Array.from(new Set([...COMMON_VAR_TYPES, ...types]));
   const inputCls = "border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none placeholder:text-neutral-300 focus:border-neutral-500";
 
   return (
     <div style={{ fontFamily: "ui-sans-serif, system-ui" }}>
       <datalist id={listId}>
-        {types.map((t) => (<option key={t} value={t} />))}
+        {typeOptions.map((t) => (<option key={t} value={t} />))}
       </datalist>
 
       {items.length === 0 ? <p className="text-sm text-neutral-400">None yet — add one below.</p> : null}
@@ -643,7 +837,7 @@ const IV_TYPES_DOCS = "#";
 
 function IvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
   const a = answers;
-  const agent = a.sd_iv_agent || "CoAX";
+  const agent = a.sd_iv_agent || (a.user_model === "CoXAM" ? "CoXAM" : a.user_model === "Sim2Real" ? "Sim2Real" : "CoAX");
   const ivs = parseIvs(a);
 
   const [customs, setCustoms] = useState<IvFactor[]>([]);
@@ -687,11 +881,6 @@ function IvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer: (id: s
     setAnswer("sd_ivs", JSON.stringify(next));
     setAnswer("sd_conditions", String(totalCells(next)));
   }
-  function setAgent(v: string) {
-    setAnswer("sd_iv_agent", v);
-    const valid = new Set([...ivFactorsForAgent(v), ...customs].map((f) => f.id));
-    save(ivs.map((e) => (valid.has(e.factor) ? e : { ...e, factor: "", label: "", levels: "", cogParam: "", min: "", max: "" })));
-  }
   function addIv() { save([...ivs, { factor: "", label: "", levels: "", alloc: "Within-subjects" }]); }
   function removeIv(i: number) { save(ivs.filter((_, idx) => idx !== i)); }
   function patch(i: number, p: Partial<IvEntry>) { save(ivs.map((e, idx) => (idx === i ? { ...e, ...p } : e))); }
@@ -730,11 +919,6 @@ function IvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer: (id: s
 
   return (
     <div style={{ fontFamily: "ui-sans-serif, system-ui" }}>
-      <div className="mb-2 flex items-center gap-2 text-sm">
-        <span className="text-neutral-500">Model / framework:</span>
-        <DocSelect value={agent} onChange={setAgent} options={IV_AGENTS} placeholder="model" />
-      </div>
-
       <div className="space-y-3">
         {ivs.length === 0 ? (
           <p className="text-sm text-neutral-400">No independent variables yet — add one below.</p>
@@ -961,8 +1145,11 @@ function buildExportText(a: Answers): string {
     `Cost per participant: ${a.sd_cost_per || "(not provided)"}`,
     `Estimated total time (min): ${p.totalMin || "(n/a)"}`,
     `Estimated total cost: ${p.totalCost || "(n/a)"}`, "",
-    "APPARATUS", v("apparatus"), "",
-    "PROCEDURE", v("procedure"), "",
+    "APPARATUS", v("apparatus"),
+    a.apparatus_url ? `Link: ${a.apparatus_url}` : "", "",
+    "PROCEDURE",
+    ...(parseProcSteps(a.proc_steps).length ? procStepsSummary(parseProcSteps(a.proc_steps)) : ["(no steps)"]),
+    "",
     "USER MODEL", v("user_model"), "",
   ].join("\n");
 }
@@ -995,8 +1182,8 @@ function buildExportJson(a: Answers): string {
       estimatedTotalTimeMin: p.totalMin || null,
       estimatedTotalCost: p.totalCost || null,
     },
-    apparatus: t("apparatus"),
-    procedure: t("procedure"),
+    apparatus: { description: t("apparatus"), link: t("apparatus_url") },
+    procedure: parseProcSteps(a.proc_steps),
     userModel: t("user_model"),
     _rawAnswers: a,
   };
@@ -1040,8 +1227,9 @@ function buildExportDoc(a: Answers): string {
     ${row("Estimated total cost", p.totalCost ? String(p.totalCost) : "n/a")}
     <h2>Apparatus</h2>
     <p>${esc((a.apparatus || "").trim()).replace(/\n/g, "<br/>") || "<i>(not provided)</i>"}</p>
+    ${(a.apparatus_url || "").trim() ? `<p><b>Link:</b> <a href="${esc(a.apparatus_url || "")}">${esc(a.apparatus_url || "")}</a></p>` : ""}
     <h2>Procedure</h2>
-    <p>${esc((a.procedure || "").trim()).replace(/\n/g, "<br/>") || "<i>(not provided)</i>"}</p>
+    ${parseProcSteps(a.proc_steps).length ? "<ol>" + parseProcSteps(a.proc_steps).filter((st) => (st.title || "").trim()).map((st) => `<li>${esc(st.title)}${(st.note || "").trim() ? ` — ${esc(st.note || "")}` : ""}${st.attachment ? ` (file: ${esc(st.attachment)})` : ""}${st.link ? ` (<a href="${esc(st.link)}">link</a>)` : ""}</li>`).join("") + "</ol>" : "<p><i>(no steps)</i></p>"}
     <h2>User Model</h2>
     <p>${t("user_model")}</p>
   `;
@@ -1146,10 +1334,16 @@ function ReviewPage({ answers, onJump }: { answers: Answers; onJump: (id: string
           {check ? <div className={cn("mt-3 rounded-lg border px-3 py-2 text-sm", checkColor)} style={{ fontFamily: "ui-sans-serif, system-ui" }}>{check.message}</div> : null}
         </RSection>
         <RSection title="Apparatus" done={isPageComplete(PAGES[2], a)} onJump={() => onJump("apparatus")}>
-          {has("apparatus") ? <p className="whitespace-pre-wrap leading-7 text-[15px] text-neutral-800">{a.apparatus}</p> : <REmpty />}
+          {has("apparatus") ? <p className="whitespace-pre-wrap leading-7 text-[15px] text-neutral-800">{a.apparatus}</p> : null}
+          {has("apparatus_url") ? <p className="mt-1 text-sm" style={{ fontFamily: "ui-sans-serif, system-ui" }}><span className="text-neutral-500">Link: </span><a href={a.apparatus_url} target="_blank" rel="noreferrer" className="underline" style={{ color: ACCENT }}>{a.apparatus_url}</a></p> : null}
+          {!has("apparatus") && !has("apparatus_url") ? <REmpty /> : null}
         </RSection>
         <RSection title="Procedure" done={isPageComplete(PAGES[3], a)} onJump={() => onJump("procedure")}>
-          {has("procedure") ? <p className="whitespace-pre-wrap leading-7 text-[15px] text-neutral-800">{a.procedure}</p> : <REmpty />}
+          {parseProcSteps(a.proc_steps).length ? (
+            <ol className="space-y-1 text-[15px] text-neutral-800">
+              {procStepsSummary(parseProcSteps(a.proc_steps)).map((line, i) => (<li key={i} className="leading-7">{line}</li>))}
+            </ol>
+          ) : <REmpty />}
         </RSection>
         <RSection title="User Model" done={isPageComplete(PAGES[4], a)} onJump={() => onJump("usermodel")}>
           <RRow label="User model" value={a.user_model} />
@@ -1161,25 +1355,118 @@ function ReviewPage({ answers, onJump }: { answers: Answers; onJump: (id: string
 
 /* ----------------------------- Chat panel (right column) ----------------------------- */
 
-const APPLY_KEYS = new Set([
-  "overview", "rq", "sd_dv", "sd_iv_agent", "sd_iv", "sd_iv_levels", "sd_cv",
-  "sd_conditions", "sd_design", "sd_balancing", "sd_participants", "ds_agent", "ds_dataset",
-]);
+// Every field the assistant may fill/modify, anywhere in the form.
+const ALL_FILLABLE = [
+  "rq",
+  "sd_dv", "sd_ivs", "sd_iv_agent", "sd_cv", "sd_rv",
+  "ds_dataset", "sd_participants", "sd_time_per", "sd_cost_per",
+  "apparatus", "apparatus_url",
+  "proc_steps",
+  "user_model",
+];
+const APPLY_KEYS = new Set(ALL_FILLABLE);
+// Keys whose APPLY value is a JSON array/object rather than a plain string.
+const STRUCTURED_APPLY = new Set(["sd_ivs", "sd_dv", "sd_cv", "sd_rv", "proc_steps"]);
 
-function parseUpdates(text: string, allowed: Set<string>): { clean: string; updates: Record<string, string> | null } {
+const OP_TARGETS = new Set(["sd_dv", "sd_ivs", "sd_cv", "sd_rv", "proc_steps"]);
+const OP_KINDS = new Set(["add", "update", "remove", "replace", "set"]);
+
+interface ApplyOp { target: string; op: string; index?: number; match?: string; value?: any; }
+interface ApplyPayload { updates: Record<string, string>; ops: ApplyOp[]; }
+
+function parseUpdates(text: string, allowed: Set<string>): { clean: string; payload: ApplyPayload | null } {
   const m = text.match(/@@APPLY@@([\s\S]*?)@@END@@/);
   const clean = text.replace(/@@APPLY@@[\s\S]*?@@END@@/g, "").trim();
-  if (!m) return { clean, updates: null };
+  if (!m) return { clean, payload: null };
   try {
     const raw = JSON.parse(m[1].trim());
     const updates: Record<string, string> = {};
     for (const [k, val] of Object.entries(raw)) {
-      if (APPLY_KEYS.has(k) && allowed.has(k) && val != null) updates[k] = String(val);
+      if (k === "ops") continue;
+      if (APPLY_KEYS.has(k) && allowed.has(k) && val != null) updates[k] = STRUCTURED_APPLY.has(k) ? JSON.stringify(val) : String(val);
     }
-    return { clean, updates: Object.keys(updates).length ? updates : null };
+    const ops: ApplyOp[] = Array.isArray(raw.ops)
+      ? raw.ops.filter((o: any) => o && OP_TARGETS.has(o.target) && allowed.has(o.target) && OP_KINDS.has(o.op))
+      : [];
+    const hasAny = Object.keys(updates).length || ops.length;
+    return { clean, payload: hasAny ? { updates, ops } : null };
   } catch {
-    return { clean, updates: null };
+    return { clean, payload: null };
   }
+}
+
+function ivAgentOf(a: Answers): string {
+  return a.sd_iv_agent || (a.user_model === "CoXAM" ? "CoXAM" : a.user_model === "Sim2Real" ? "Sim2Real" : "CoAX");
+}
+
+interface OpTargetCfg {
+  parse: (a: Answers) => any[];
+  write: (a: Answers, list: any[]) => Answers;
+  match: (item: any, q: string) => boolean;
+  build: (spec: any, a: Answers) => any | null;
+}
+
+const OP_CFG: Record<string, OpTargetCfg> = {
+  sd_dv: {
+    parse: (a) => parseDvs(a.sd_dv),
+    write: (a, list) => ({ ...a, sd_dv: JSON.stringify(normalizeDvSpecs(list)) }),
+    match: (it, q) => dvDisplayName(it).toLowerCase().includes(q),
+    build: (v) => normalizeDvSpecs([v])[0] ?? null,
+  },
+  sd_cv: {
+    parse: (a) => parseVars(a.sd_cv),
+    write: (a, list) => ({ ...a, sd_cv: JSON.stringify(normalizeVarSpecs(list)) }),
+    match: (it, q) => String(it.name || "").toLowerCase().includes(q),
+    build: (v) => normalizeVarSpecs([v])[0] ?? null,
+  },
+  sd_rv: {
+    parse: (a) => parseVars(a.sd_rv),
+    write: (a, list) => ({ ...a, sd_rv: JSON.stringify(normalizeVarSpecs(list)) }),
+    match: (it, q) => String(it.name || "").toLowerCase().includes(q),
+    build: (v) => normalizeVarSpecs([v])[0] ?? null,
+  },
+  proc_steps: {
+    parse: (a) => parseProcSteps(a.proc_steps),
+    write: (a, list) => ({ ...a, proc_steps: JSON.stringify(normalizeProcSpecs(list)) }),
+    match: (it, q) => String(it.title || "").toLowerCase().includes(q),
+    build: (v) => normalizeProcSpecs([v])[0] ?? null,
+  },
+  sd_ivs: {
+    parse: (a) => parseIvs(a),
+    write: (a, list) => ({ ...a, sd_ivs: JSON.stringify(list), sd_conditions: String(totalCells(list as IvEntry[])) }),
+    match: (it, q) => (String(it.label || "") + " " + String(it.factor || "")).toLowerCase().includes(q),
+    build: (v, a) => normalizeIvSpecs([v], ivAgentOf(a))[0] ?? null,
+  },
+};
+
+function applyOneOp(a: Answers, op: ApplyOp): Answers {
+  const cfg = OP_CFG[op.target];
+  if (!cfg) return a;
+  let list = cfg.parse(a);
+  const findIdx = (): number => {
+    if (op.index != null && !Number.isNaN(Number(op.index))) {
+      const i = Math.round(Number(op.index)) - 1; // model uses 1-based positions
+      return i >= 0 && i < list.length ? i : -1;
+    }
+    if (op.match) { const q = String(op.match).toLowerCase(); return list.findIndex((it) => cfg.match(it, q)); }
+    return -1;
+  };
+  if (op.op === "add") {
+    const items = Array.isArray(op.value) ? op.value : [op.value];
+    list = [...list, ...items.map((v) => cfg.build(v, a)).filter((x) => x != null)];
+  } else if (op.op === "remove") {
+    const i = findIdx(); if (i >= 0) list = list.filter((_, idx) => idx !== i);
+  } else if (op.op === "update") {
+    const i = findIdx();
+    if (i >= 0) {
+      const built = cfg.build({ ...list[i], ...(op.value || {}) }, a);
+      if (built) list = list.map((it, idx) => (idx === i ? built : it));
+    }
+  } else if (op.op === "replace" || op.op === "set") {
+    const items = Array.isArray(op.value) ? op.value : [op.value];
+    list = items.map((v) => cfg.build(v, a)).filter((x) => x != null);
+  }
+  return cfg.write(a, list);
 }
 
 function stripMd(text: string): string {
@@ -1199,6 +1486,7 @@ const FIELD_LABELS: Record<string, string> = {
   sd_participants: "number of participants",
   ds_dataset: "dataset",
   apparatus: "apparatus & materials",
+  apparatus_url: "study / apparatus link",
   procedure: "experiment procedure",
   user_model: "user model",
 };
@@ -1210,16 +1498,16 @@ const PAGE_CHAT: Record<string, { focus: string; fields: string[] }> = {
     fields: ["rq"],
   },
   studydesign: {
-    focus: "the model/framework, the dataset, and number of participants. Note: the variables (DV / IV / CV / RV) are added by the user as typed lists in the panel, and the user model is chosen on its own page — guide them, but you cannot set those yourself.",
-    fields: ["sd_iv_agent", "ds_dataset", "sd_participants"],
+    focus: "the independent variable(s), the model/framework, the dataset, and number of participants. You CAN set the IVs here via sd_ivs (factor, levels, within/between, counterbalancing). The other variables (DV / CV / RV) and the user model are added by the user elsewhere — guide them on those.",
+    fields: ["sd_iv_agent", "sd_ivs", "ds_dataset", "sd_participants"],
   },
   apparatus: {
-    focus: "the apparatus and materials (devices, software/toolkit, what participants interact with)",
-    fields: ["apparatus"],
+    focus: "the apparatus and materials (devices, software/toolkit). The user can also paste a link to their study build to preview it; you may set the description and the link.",
+    fields: ["apparatus", "apparatus_url"],
   },
   procedure: {
-    focus: "the step-by-step experiment procedure",
-    fields: ["procedure"],
+    focus: "the step-by-step procedure. The user builds the steps as a structured list in the panel (each step can collect a DV and carry an attachment like a consent form). Help them think through the steps and how they map to the DVs, but you cannot add the steps yourself.",
+    fields: [],
   },
   usermodel: {
     focus: "the user model — a cognitive model or ML proxy; the user picks one from the list (you cannot set it yourself, but help them choose)",
@@ -1231,7 +1519,7 @@ const PAGE_CHAT: Record<string, { focus: string; fields: string[] }> = {
   },
 };
 
-const ALL_CONTENT_KEYS = ["rq", "sd_iv_agent", "sd_participants", "ds_dataset", "apparatus", "procedure", "user_model"];
+const ALL_CONTENT_KEYS = ["rq", "sd_iv_agent", "sd_participants", "ds_dataset", "apparatus", "apparatus_url", "user_model"];
 
 function buildChatContext(page: Page, a: Answers): string {
   const cfg = PAGE_CHAT[page.id] ?? { focus: "", fields: [] as string[] };
@@ -1243,27 +1531,24 @@ function buildChatContext(page: Page, a: Answers): string {
   // Whole-design awareness: a compact view of every section.
   const ivs = parseIvs(a);
   const ivLine = ivs.length ? ivs.map((e, i) => `IV${i + 1} ${e.label || "?"}=${e.levels || "?"} [${e.alloc === "Between-subjects" ? "between" : "within"}${e.balancing ? ", " + e.balancing : ""}]`).join("; ") : "(none yet)";
+  const procSteps = parseProcSteps(a.proc_steps);
+  const procLine = procSteps.length ? procStepsSummary(procSteps).join(" | ") : "(no steps yet)";
   const lines = ALL_CONTENT_KEYS.map((k) => `- ${FIELD_LABELS[k] ?? k}: ${snip(k)}`);
   lines.splice(1, 0, `- dependent variables: ${dvSummary(parseDvs(a.sd_dv)) || "(empty)"}`);
   lines.push(`- control variables (CV): ${varsSummary(parseVars(a.sd_cv)) || "(empty)"}`);
   lines.push(`- random variables (RV): ${varsSummary(parseVars(a.sd_rv)) || "(empty)"}`);
   lines.push(`- independent variables: ${ivLine}`);
+  lines.push(`- procedure steps: ${procLine}`);
   const overview = lines.join("\n");
 
-  const fillable = cfg.fields.length ? cfg.fields.join(", ") : "(none — user-driven page)";
-  const missing = cfg.fields.filter((k) => !(a[k] || "").trim());
-  const missingLine = cfg.fields.length === 0
-    ? "There are no fields for you to fill here; help the user with this section."
-    : missing.length === 0
-      ? "All fields you can fill on this page are done — say it looks complete and they can move on."
-      : `Still missing on this page: ${missing.map((k) => FIELD_LABELS[k] ?? k).join("; ")}. Ask about the next one or two.`;
+  const pageFields = cfg.fields.length ? cfg.fields.join(", ") : "(this page's structure is edited in the UI)";
 
   return [
     `Whole design so far (all sections):\n${overview}`,
     `Current page: ${page.navTitle}`,
     `This page covers: ${cfg.focus}`,
-    `Fields you may fill right now: ${fillable}`,
-    missingLine,
+    `You can fill in or MODIFY any field in the whole form via the APPLY block — not just the current page. When the user asks to change something on another section, do it. For structured fields (sd_dv, sd_ivs, sd_cv, sd_rv, proc_steps) always send the COMPLETE updated list, since it replaces the old one.`,
+    `The current page is mainly about: ${pageFields}. Prioritise helping with that, but follow the user wherever they go.`,
   ].join("\n\n");
 }
 
@@ -1272,7 +1557,7 @@ interface ChatMsg {
   content: string;
 }
 
-function ChatPanel({ messages, setMessages, allowedFields, context, onApplyUpdates }: { messages: ChatMsg[]; setMessages: React.Dispatch<React.SetStateAction<ChatMsg[]>>; allowedFields: string[]; context: string; onApplyUpdates: (u: Record<string, string>) => void }) {
+function ChatPanel({ messages, setMessages, allowedFields, context, onApplyUpdates }: { messages: ChatMsg[]; setMessages: React.Dispatch<React.SetStateAction<ChatMsg[]>>; allowedFields: string[]; context: string; onApplyUpdates: (p: ApplyPayload) => void }) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1314,13 +1599,13 @@ function ChatPanel({ messages, setMessages, allowedFields, context, onApplyUpdat
           return copy;
         });
       }
-      const { clean, updates } = parseUpdates(acc, allowedRef.current);
+      const { clean, payload } = parseUpdates(acc, allowedRef.current);
       setMessages((m) => {
         const copy = [...m];
         copy[copy.length - 1] = { role: "assistant", content: clean || "Done." };
         return copy;
       });
-      if (updates) onApplyUpdates(updates);
+      if (payload) onApplyUpdates(payload);
     } catch {
       setMessages((m) => {
         const copy = [...m];
