@@ -29,6 +29,7 @@ import {
   DATASET_OPTIONS,
   USER_MODELS,
   UserModel,
+  parseIdList,
   IV_CATALOG,
   IV_GROUP_ORDER,
   IvFactor,
@@ -99,7 +100,7 @@ export function ExperimentWizard() {
     const { updates, ops } = payload;
     setAnswers((a) => {
       let next: Answers = { ...a };
-      const STRUCTURED = new Set(["sd_ivs", "sd_dv", "sd_cv", "sd_rv", "proc_steps"]);
+      const STRUCTURED = new Set(["sd_ivs", "sd_dv", "sd_cv", "sd_rv", "proc_steps", "ml_proxies"]);
       for (const [k, v] of Object.entries(updates)) {
         if (STRUCTURED.has(k)) continue; // handled below
         next[k] = v;
@@ -118,6 +119,7 @@ export function ExperimentWizard() {
       if (updates.sd_cv != null) { const s = parseArr(updates.sd_cv); if (s) next.sd_cv = JSON.stringify(normalizeVarSpecs(s)); }
       if (updates.sd_rv != null) { const s = parseArr(updates.sd_rv); if (s) next.sd_rv = JSON.stringify(normalizeVarSpecs(s)); }
       if (updates.proc_steps != null) { const s = parseArr(updates.proc_steps); if (s) next.proc_steps = JSON.stringify(normalizeProcSpecs(s)); }
+      if (updates.ml_proxies != null) { const s = parseArr(updates.ml_proxies); if (Array.isArray(s)) next.ml_proxies = JSON.stringify(s.map(String).filter(Boolean)); }
       // Incremental ops (preferred for edits).
       for (const op of ops) next = applyOneOp(next, op);
       return next;
@@ -512,10 +514,12 @@ function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setAnswer: 
             const per = parseInt(a.sd_participants || "", 10) || 0;
             const between = betweenCells(ivs);
             const totalP = per * (between || 1);
+            const trials = parseInt(a.sd_trials || "10", 10) || 10;
             const timePer = parseFloat(a.sd_time_per || "") || 0;
             const costPer = parseFloat(a.sd_cost_per || "") || 0;
             const totalMin = totalP * timePer;
             const totalCost = totalP * costPer;
+            const totalTrials = totalP * trials;
             const hrs = totalMin / 60;
             return (
               <>
@@ -523,6 +527,11 @@ function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setAnswer: 
                   We will recruit{" "}
                   <input type="number" value={a.sd_participants ?? ""} onChange={(e) => setAnswer("sd_participants", e.target.value)} placeholder="N" className={numCls} />{" "}
                   participants for each condition.
+                </p>
+                <p className="text-[15px] leading-8 text-neutral-800">
+                  Each participant completes{" "}
+                  <input type="number" value={a.sd_trials ?? "10"} onChange={(e) => setAnswer("sd_trials", e.target.value)} placeholder="10" className={numCls} />{" "}
+                  trials.
                 </p>
                 <p className="text-[15px] leading-8 text-neutral-800">
                   Each participant takes{" "}
@@ -533,6 +542,7 @@ function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setAnswer: 
                 </p>
                 <div className="mt-2 rounded-lg bg-neutral-50 px-3 py-2 text-sm text-neutral-600" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
                   <div><span className="text-neutral-400">Total participants:</span> <span className="font-medium text-neutral-800">{totalP}</span> ({per} × {between || 1} between-subjects group{between === 1 ? "" : "s"}, {cells} cell{cells === 1 ? "" : "s"})</div>
+                  <div><span className="text-neutral-400">Total trials:</span> <span className="font-medium text-neutral-800">{totalTrials}</span> ({totalP} × {trials})</div>
                   {totalMin > 0 ? <div><span className="text-neutral-400">Estimated total time:</span> <span className="font-medium text-neutral-800">{totalMin} min</span> (~{hrs.toFixed(1)} h)</div> : null}
                   {totalCost > 0 ? <div><span className="text-neutral-400">Estimated total cost:</span> <span className="font-medium text-neutral-800">{totalCost.toLocaleString()}</span></div> : null}
                 </div>
@@ -1009,7 +1019,6 @@ function UserModelBody({ answers, setAnswer }: { answers: Answers; setAnswer: (i
   const [showAdd, setShowAdd] = useState(false);
   const [draft, setDraft] = useState({ name: "", full: "", description: "", category: "Custom" });
 
-  // load user-added models from localStorage
   useEffect(() => {
     try {
       const raw = localStorage.getItem("experiment-user-models");
@@ -1031,48 +1040,57 @@ function UserModelBody({ answers, setAnswer }: { answers: Answers; setAnswer: (i
   }
 
   const all = [...USER_MODELS, ...customs];
-  const cats = ["Cognitive model", "ML proxy", "Custom"];
+  const userModels = all.filter((m) => m.category === "Cognitive model" || m.category === "Custom");
+  const proxies = all.filter((m) => m.category === "ML proxy");
+  const selectedProxies = parseIdList(a.ml_proxies);
+
+  function toggleProxy(id: string) {
+    const next = selectedProxies.includes(id) ? selectedProxies.filter((x) => x !== id) : [...selectedProxies, id];
+    setAnswer("ml_proxies", JSON.stringify(next));
+  }
+
+  function Card({ m, on, multi, onClick }: { m: UserModel; on: boolean; multi: boolean; onClick: () => void }) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={cn("flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors", on ? "border-transparent ring-2" : "border-neutral-200 hover:bg-neutral-50")}
+        style={on ? ({ ["--tw-ring-color" as any]: ACCENT, borderColor: ACCENT } as React.CSSProperties) : undefined}
+      >
+        <span className={cn("mt-0.5 grid h-5 w-5 shrink-0 place-items-center border", multi ? "rounded-[5px]" : "rounded-full", on ? "border-transparent text-white" : "border-neutral-300")} style={on ? { backgroundColor: ACCENT } : undefined}>
+          {on ? <Check className="h-3 w-3" /> : null}
+        </span>
+        <span className="min-w-0">
+          <span className="block text-sm font-medium text-neutral-900">{m.name} <span className="font-normal text-neutral-400">· {m.full}</span></span>
+          <span className="mt-0.5 block text-sm text-neutral-500">{m.description}</span>
+        </span>
+      </button>
+    );
+  }
 
   return (
     <>
       <h1 className="text-2xl font-semibold leading-snug tracking-tight">User model</h1>
-      <p className="mt-2 text-sm text-neutral-500">The model whose behaviour stands in for (or simulates) the user — a cognitive model or an ML proxy. Pick one, or add your own.</p>
+      <p className="mt-2 text-sm text-neutral-500">Choose the model that stands in for the user, and any ML proxies to run as baselines.</p>
 
       <div className="mt-6 space-y-6">
-        {cats.map((cat) => {
-          const items = all.filter((m) => m.category === cat);
-          if (!items.length) return null;
-          return (
-            <div key={cat}>
-              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">{cat}</p>
-              <div className="space-y-2">
-                {items.map((m) => {
-                  const on = a.user_model === m.id;
-                  return (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => setAnswer("user_model", m.id)}
-                      className={cn(
-                        "flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors",
-                        on ? "border-transparent ring-2" : "border-neutral-200 hover:bg-neutral-50"
-                      )}
-                      style={on ? ({ ["--tw-ring-color" as any]: ACCENT, borderColor: ACCENT } as React.CSSProperties) : undefined}
-                    >
-                      <span className={cn("mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border", on ? "border-transparent text-white" : "border-neutral-300")} style={on ? { backgroundColor: ACCENT } : undefined}>
-                        {on ? <Check className="h-3 w-3" /> : null}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block text-sm font-medium text-neutral-900">{m.name} <span className="font-normal text-neutral-400">· {m.full}</span></span>
-                        <span className="mt-0.5 block text-sm text-neutral-500">{m.description}</span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
+        <div>
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">User model · select one</p>
+          <div className="space-y-2">
+            {userModels.map((m) => (
+              <Card key={m.id} m={m} multi={false} on={a.user_model === m.id} onClick={() => setAnswer("user_model", m.id)} />
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">ML proxy baselines · select any</p>
+          <div className="space-y-2">
+            {proxies.map((m) => (
+              <Card key={m.id} m={m} multi on={selectedProxies.includes(m.id)} onClick={() => toggleProxy(m.id)} />
+            ))}
+          </div>
+        </div>
 
         {showAdd ? (
           <div className="rounded-xl border border-neutral-200 p-3">
@@ -1109,15 +1127,20 @@ function ivSummaryLines(a: Answers): string[] {
   });
 }
 
+function mlProxyNames(a: Answers): string {
+  return parseIdList(a.ml_proxies).map((id) => USER_MODELS.find((m) => m.id === id)?.name ?? id).join(", ");
+}
+
 function participantTotals(a: Answers) {
   const ivs = parseIvs(a);
   const per = parseInt(a.sd_participants || "", 10) || 0;
   const between = betweenCells(ivs) || 1;
   const cells = totalCells(ivs);
   const totalP = per * between;
+  const trials = parseInt(a.sd_trials || "10", 10) || 10;
   const timePer = parseFloat(a.sd_time_per || "") || 0;
   const costPer = parseFloat(a.sd_cost_per || "") || 0;
-  return { per, between, cells, totalP, timePer, costPer, totalMin: totalP * timePer, totalCost: totalP * costPer };
+  return { per, between, cells, totalP, trials, totalTrials: totalP * trials, timePer, costPer, totalMin: totalP * timePer, totalCost: totalP * costPer };
 }
 
 function buildExportText(a: Answers): string {
@@ -1131,7 +1154,6 @@ function buildExportText(a: Answers): string {
     "STUDY DESIGN, VARIABLES & PARTICIPANTS",
     `Dependent variables (DV): ${dvSummary(parseDvs(a.sd_dv)) || "(not provided)"}`,
     ...parseDvs(a.sd_dv).filter((e) => (e.formula || "").trim()).map((e) => `    formula[${dvDisplayName(e)}]: ${e.formula}`),
-    `Model / framework: ${v("sd_iv_agent")}`,
     "Independent variables:",
     ...ivLines.map((l) => `  - ${l}`),
     `Control variables (CV): ${varsSummary(parseVars(a.sd_cv)) || "(not provided)"}`,
@@ -1141,6 +1163,8 @@ function buildExportText(a: Answers): string {
     `Total conditions / cells: ${ivs.length ? p.cells : "(n/a)"}`,
     `Participants per condition: ${a.sd_participants ? p.per : "(not provided)"}`,
     `Total participants: ${a.sd_participants ? p.totalP : "(n/a)"}`,
+    `Trials per participant: ${p.trials}`,
+    `Total trials: ${a.sd_participants ? p.totalTrials : "(n/a)"}`,
     `Time per participant (min): ${a.sd_time_per || "(not provided)"}`,
     `Cost per participant: ${a.sd_cost_per || "(not provided)"}`,
     `Estimated total time (min): ${p.totalMin || "(n/a)"}`,
@@ -1150,7 +1174,8 @@ function buildExportText(a: Answers): string {
     "PROCEDURE",
     ...(parseProcSteps(a.proc_steps).length ? procStepsSummary(parseProcSteps(a.proc_steps)) : ["(no steps)"]),
     "",
-    "USER MODEL", v("user_model"), "",
+    "USER MODEL", v("user_model"),
+    `ML proxy baselines: ${mlProxyNames(a) || "(none)"}`, "",
   ].join("\n");
 }
 
@@ -1177,6 +1202,8 @@ function buildExportJson(a: Answers): string {
       betweenSubjectsCells: ivs.length ? p.between : null,
       participantsPerCondition: a.sd_participants ? p.per : null,
       totalParticipants: a.sd_participants ? p.totalP : null,
+      trialsPerParticipant: p.trials,
+      totalTrials: a.sd_participants ? p.totalTrials : null,
       timePerParticipantMin: a.sd_time_per ? p.timePer : null,
       costPerParticipant: a.sd_cost_per ? p.costPer : null,
       estimatedTotalTimeMin: p.totalMin || null,
@@ -1185,6 +1212,7 @@ function buildExportJson(a: Answers): string {
     apparatus: { description: t("apparatus"), link: t("apparatus_url") },
     procedure: parseProcSteps(a.proc_steps),
     userModel: t("user_model"),
+    mlProxyBaselines: parseIdList(a.ml_proxies),
     _rawAnswers: a,
   };
   return JSON.stringify(obj, null, 2);
@@ -1214,7 +1242,6 @@ function buildExportDoc(a: Answers): string {
     <p>${esc((a.rq || "").trim()).replace(/\n/g, "<br/>") || "<i>(not provided)</i>"}</p>
     <h2>Study Design, Variables &amp; Participants</h2>
     <p><b>Dependent variables (DV):</b></p>${dvHtml}
-    ${row("Model / framework", t("sd_iv_agent"))}
     <p><b>Independent variables:</b></p>${ivHtml}
     ${row("Control variables (CV)", esc(varsSummary(parseVars(a.sd_cv))) || "<i>(none)</i>")}
     ${row("Random variables (RV)", esc(varsSummary(parseVars(a.sd_rv))) || "<i>(none)</i>")}
@@ -1223,6 +1250,8 @@ function buildExportDoc(a: Answers): string {
     ${row("Conditions / cells", String(ivs.length ? p.cells : "n/a"))}
     ${row("Participants per condition", a.sd_participants ? String(p.per) : "<i>(not provided)</i>")}
     ${row("Total participants", a.sd_participants ? String(p.totalP) : "n/a")}
+    ${row("Trials per participant", String(p.trials))}
+    ${row("Total trials", a.sd_participants ? String(p.totalTrials) : "n/a")}
     ${row("Estimated total time", p.totalMin ? `${p.totalMin} min (~${(p.totalMin / 60).toFixed(1)} h)` : "n/a")}
     ${row("Estimated total cost", p.totalCost ? String(p.totalCost) : "n/a")}
     <h2>Apparatus</h2>
@@ -1232,6 +1261,7 @@ function buildExportDoc(a: Answers): string {
     ${parseProcSteps(a.proc_steps).length ? "<ol>" + parseProcSteps(a.proc_steps).filter((st) => (st.title || "").trim()).map((st) => `<li>${esc(st.title)}${(st.note || "").trim() ? ` — ${esc(st.note || "")}` : ""}${st.attachment ? ` (file: ${esc(st.attachment)})` : ""}${st.link ? ` (<a href="${esc(st.link)}">link</a>)` : ""}</li>`).join("") + "</ol>" : "<p><i>(no steps)</i></p>"}
     <h2>User Model</h2>
     <p>${t("user_model")}</p>
+    ${mlProxyNames(a) ? `<p><b>ML proxy baselines:</b> ${esc(mlProxyNames(a))}</p>` : ""}
   `;
   return `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>Experiment Design</title><style>
     body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1f2937;}
@@ -1311,7 +1341,6 @@ function ReviewPage({ answers, onJump }: { answers: Answers; onJump: (id: string
         </RSection>
         <RSection title="Study Design, Variables & Participants" done={isPageComplete(PAGES[1], a)} onJump={() => onJump("studydesign")}>
           <RRow label="Dependent variables" value={dvSummary(parseDvs(a.sd_dv))} />
-          <RRow label="Model / framework" value={a.sd_iv_agent} />
           <div className="grid grid-cols-[170px_1fr] gap-3 py-1.5 text-[15px]">
             <span className="text-neutral-500">Independent variables</span>
             <span className="text-neutral-900">
@@ -1329,6 +1358,8 @@ function ReviewPage({ answers, onJump }: { answers: Answers; onJump: (id: string
           <RRow label="Conditions / cells" value={parseIvs(a).length ? String(totalCells(parseIvs(a))) : ""} />
           <RRow label="Participants / condition" value={a.sd_participants} />
           <RRow label="Total participants" value={a.sd_participants ? String(participantTotals(a).totalP) : ""} />
+          <RRow label="Trials / participant" value={String(participantTotals(a).trials)} />
+          <RRow label="Total trials" value={a.sd_participants ? String(participantTotals(a).totalTrials) : ""} />
           {participantTotals(a).totalMin ? <RRow label="Est. total time" value={`${participantTotals(a).totalMin} min (~${(participantTotals(a).totalMin / 60).toFixed(1)} h)`} /> : null}
           {participantTotals(a).totalCost ? <RRow label="Est. total cost" value={String(participantTotals(a).totalCost)} /> : null}
           {check ? <div className={cn("mt-3 rounded-lg border px-3 py-2 text-sm", checkColor)} style={{ fontFamily: "ui-sans-serif, system-ui" }}>{check.message}</div> : null}
@@ -1347,6 +1378,7 @@ function ReviewPage({ answers, onJump }: { answers: Answers; onJump: (id: string
         </RSection>
         <RSection title="User Model" done={isPageComplete(PAGES[4], a)} onJump={() => onJump("usermodel")}>
           <RRow label="User model" value={a.user_model} />
+          <RRow label="ML proxy baselines" value={mlProxyNames(a)} />
         </RSection>
       </div>
     </div>
@@ -1359,14 +1391,15 @@ function ReviewPage({ answers, onJump }: { answers: Answers; onJump: (id: string
 const ALL_FILLABLE = [
   "rq",
   "sd_dv", "sd_ivs", "sd_iv_agent", "sd_cv", "sd_rv",
-  "ds_dataset", "sd_participants", "sd_time_per", "sd_cost_per",
+  "ds_dataset", "sd_participants", "sd_trials", "sd_time_per", "sd_cost_per",
   "apparatus", "apparatus_url",
   "proc_steps",
   "user_model",
+  "ml_proxies",
 ];
 const APPLY_KEYS = new Set(ALL_FILLABLE);
 // Keys whose APPLY value is a JSON array/object rather than a plain string.
-const STRUCTURED_APPLY = new Set(["sd_ivs", "sd_dv", "sd_cv", "sd_rv", "proc_steps"]);
+const STRUCTURED_APPLY = new Set(["sd_ivs", "sd_dv", "sd_cv", "sd_rv", "proc_steps", "ml_proxies"]);
 
 const OP_TARGETS = new Set(["sd_dv", "sd_ivs", "sd_cv", "sd_rv", "proc_steps"]);
 const OP_KINDS = new Set(["add", "update", "remove", "replace", "set"]);
@@ -1539,6 +1572,7 @@ function buildChatContext(page: Page, a: Answers): string {
   lines.push(`- random variables (RV): ${varsSummary(parseVars(a.sd_rv)) || "(empty)"}`);
   lines.push(`- independent variables: ${ivLine}`);
   lines.push(`- procedure steps: ${procLine}`);
+  lines.push(`- ML proxy baselines: ${mlProxyNames(a) || "(none)"}`);
   const overview = lines.join("\n");
 
   const pageFields = cfg.fields.length ? cfg.fields.join(", ") : "(this page's structure is edited in the UI)";

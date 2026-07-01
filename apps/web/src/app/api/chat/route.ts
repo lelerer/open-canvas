@@ -78,13 +78,15 @@ Field ids you can fill or modify (anywhere in the form):
 - sd_cv — control variables. One item: { "name": "…", "type": "…" }. type is free text; common: Numerical (continuous), Categorical (nominal), Ordinal, Binary, Count. Edit with ops.
 - sd_rv — random variables (same item shape as sd_cv). Edit with ops.
 - sd_participants (number string) — participants per condition
+- sd_trials (number string) — trials per participant (default 10)
 - sd_time_per (number string) — minutes per participant
 - sd_cost_per (number string) — cost per participant
 - ds_dataset (text) — dataset name (e.g. "Adult Income", "Wine Quality"), if the user states one
 - apparatus (text) — apparatus & materials
 - apparatus_url (text) — a full URL (http/https) to the user's study or formative-study build, which is previewed on the page
 - proc_steps — procedure steps. One item: { "title": "…", "note": "<optional details>", "link": "<optional URL>" }. (Attachments are uploaded by the user; you only set title / note / link.) Edit with ops.
-- user_model (text) — the model under study: one of "CoAX", "CoXAM", "MLP-proxy", "XGBoost-proxy", or a custom name the user gives.`;
+- user_model (text) — the ONE model under study: one of "CoAX", "CoXAM", or a custom name the user gives.
+- ml_proxies (ARRAY of strings) — the ML proxy baselines to run (choose any): from "KNN", "Decision Tree", "MLP", "Linear Regression", "Global SHAP". Send the full array of the ones selected, e.g. ["KNN","MLP"]. (KNN and Decision Tree apply to both CoAX and CoXAM; MLP is for CoAX; Linear Regression is CoXAM forward simulation; Global SHAP is CoXAM counterfactual simulation.)`;
 
 interface ChatMessage {
   role: "user" | "assistant";

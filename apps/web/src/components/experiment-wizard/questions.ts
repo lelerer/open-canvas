@@ -52,12 +52,23 @@ export interface UserModel {
   category: string; // "Cognitive model" | "ML proxy" | "Custom"
 }
 
+// tolerant parse for a stored list of ids (JSON array or comma-separated)
+export function parseIdList(raw: string | undefined): string[] {
+  const s = (raw || "").trim();
+  if (!s) return [];
+  try { const a = JSON.parse(s); if (Array.isArray(a)) return a.map(String); } catch { /* csv */ }
+  return s.split(",").map((x) => x.trim()).filter(Boolean);
+}
+
 export const USER_MODELS: UserModel[] = [
   { id: "CoAX", name: "CoAX", full: "CoAX — full name TBC", description: "Cognitive user model (please add a 1–2 line description).", category: "Cognitive model" },
   { id: "CoXAM", name: "CoXAM", full: "CoXAM — full name TBC", description: "Cognitive user model (please add a 1–2 line description).", category: "Cognitive model" },
-  // ML proxies — please confirm which to include and their descriptions:
-  { id: "MLP-proxy", name: "MLP proxy", full: "Multi-layer perceptron proxy user", description: "ML proxy user (placeholder — confirm).", category: "ML proxy" },
-  { id: "XGBoost-proxy", name: "XGBoost proxy", full: "Gradient-boosted trees proxy user", description: "ML proxy user (placeholder — confirm).", category: "ML proxy" },
+  // ML proxies:
+  { id: "KNN", name: "KNN", full: "k-Nearest Neighbours", description: "General ML proxy — applies to both CoAX and CoXAM.", category: "ML proxy" },
+  { id: "Decision Tree", name: "Decision Tree", full: "Decision tree", description: "General ML proxy — applies to both CoAX and CoXAM.", category: "ML proxy" },
+  { id: "MLP", name: "MLP", full: "Multi-layer perceptron", description: "ML proxy for CoAX.", category: "ML proxy" },
+  { id: "Linear Regression", name: "Linear Regression", full: "Linear regression", description: "ML proxy for CoXAM — forward simulation.", category: "ML proxy" },
+  { id: "Global SHAP", name: "Global SHAP", full: "Global SHAP", description: "ML proxy for CoXAM — counterfactual simulation.", category: "ML proxy" },
 ];
 
 export const DESIGN_TYPES = ["Within-subjects", "Between-subjects", "Mixed"] as const;
