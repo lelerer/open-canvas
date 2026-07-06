@@ -4,7 +4,7 @@
 
 export type Answers = Record<string, string>;
 
-export type PageKind = "text" | "studydesign" | "apparatus" | "procedure" | "usermodel" | "review";
+export type PageKind = "text" | "studydesign" | "apparatus" | "procedure" | "usermodel" | "review" | "results";
 
 export interface Page {
   id: string;
@@ -522,7 +522,19 @@ export const PAGES: Page[] = [
     section: "Final",
     kind: "review",
   },
+  {
+    id: "results",
+    navTitle: "Results & Report",
+    section: "Final",
+    kind: "results",
+  },
 ];
+
+// Cognitive parameters for a given cognitive model (CoAX / CoXAM / …).
+export function cognitiveParamsFor(agent: string): CognitiveParam[] {
+  const f = IV_CATALOG.find((x) => x.kind === "cognitive");
+  return (f?.cognitiveByAgent && f.cognitiveByAgent[agent]) || [];
+}
 
 // ---- Completeness ----
 export function isPageComplete(page: Page, a: Answers): boolean {

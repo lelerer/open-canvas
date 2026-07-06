@@ -11,6 +11,8 @@ import {
   Wand2,
   Download,
   Upload,
+  Play,
+  BarChart3,
   X,
   Plus,
 } from "lucide-react";
@@ -30,6 +32,8 @@ import {
   USER_MODELS,
   UserModel,
   parseIdList,
+  cognitiveParamsFor,
+  CognitiveParam,
   IV_CATALOG,
   IV_GROUP_ORDER,
   IvFactor,
@@ -100,7 +104,7 @@ export function ExperimentWizard() {
     const { updates, ops } = payload;
     setAnswers((a) => {
       let next: Answers = { ...a };
-      const STRUCTURED = new Set(["sd_ivs", "sd_dv", "sd_cv", "sd_rv", "proc_steps", "ml_proxies"]);
+      const STRUCTURED = new Set(["sd_ivs", "sd_dv", "sd_cv", "sd_rv", "proc_steps", "ml_proxies", "cog_config"]);
       for (const [k, v] of Object.entries(updates)) {
         if (STRUCTURED.has(k)) continue; // handled below
         next[k] = v;
@@ -120,6 +124,16 @@ export function ExperimentWizard() {
       if (updates.sd_rv != null) { const s = parseArr(updates.sd_rv); if (s) next.sd_rv = JSON.stringify(normalizeVarSpecs(s)); }
       if (updates.proc_steps != null) { const s = parseArr(updates.proc_steps); if (s) next.proc_steps = JSON.stringify(normalizeProcSpecs(s)); }
       if (updates.ml_proxies != null) { const s = parseArr(updates.ml_proxies); if (Array.isArray(s)) next.ml_proxies = JSON.stringify(s.map(String).filter(Boolean)); }
+      if (updates.cog_config != null) {
+        const s = parseArr(updates.cog_config);
+        if (s && typeof s === "object" && !Array.isArray(s)) {
+          let existing: Record<string, string> = {};
+          try { existing = JSON.parse(next.cog_config || "{}"); } catch { existing = {}; }
+          const merged: Record<string, string> = { ...existing };
+          for (const [k, v] of Object.entries(s)) merged[k] = String(v);
+          next.cog_config = JSON.stringify(merged);
+        }
+      }
       // Incremental ops (preferred for edits).
       for (const op of ops) next = applyOneOp(next, op);
       return next;
@@ -174,6 +188,8 @@ export function ExperimentWizard() {
         <main className="flex-1 overflow-y-auto">
           {page.kind === "review" ? (
             <ReviewPage answers={answers} onJump={(id) => setStep(PAGES.findIndex((p) => p.id === id))} />
+          ) : page.kind === "results" ? (
+            <ResultsBody answers={answers} setAnswer={setAnswer} />
           ) : (
             <div className="mx-auto w-full max-w-2xl px-6 py-10">
               {page.kind === "text" ? (
@@ -1049,6 +1065,18 @@ function UserModelBody({ answers, setAnswer }: { answers: Answers; setAnswer: (i
     setAnswer("ml_proxies", JSON.stringify(next));
   }
 
+  const cogAgent = a.user_model === "CoAX" ? "CoAX" : a.user_model === "CoXAM" ? "CoXAM" : "";
+  const cogParams: CognitiveParam[] = cogAgent ? cognitiveParamsFor(cogAgent) : [];
+  const cogCfg: Record<string, string> = (() => { try { return JSON.parse(a.cog_config || "{}"); } catch { return {}; } })();
+  function setCog(name: string, val: string) {
+    setAnswer("cog_config", JSON.stringify({ ...cogCfg, [name]: val }));
+  }
+  // Cognitive parameters manipulated as an IV in Study Design (kept in sync — those are varied, not fixed here).
+  const manipulatedCog: Record<string, string> = {};
+  for (const e of parseIvs(a)) {
+    if (e.factor === "cognitive" && e.cogParam) manipulatedCog[e.cogParam] = e.levels || "";
+  }
+
   function Card({ m, on, multi, onClick }: { m: UserModel; on: boolean; multi: boolean; onClick: () => void }) {
     return (
       <button
@@ -1083,6 +1111,45 @@ function UserModelBody({ answers, setAnswer }: { answers: Answers; setAnswer: (i
           </div>
         </div>
 
+        {cogParams.length ? (
+          <div>
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Cognitive parameters · {cogAgent}</p>
+            <div className="space-y-2">
+              {cogParams.map((p) => {
+                const manip = manipulatedCog[p.name];
+                const isManip = manip !== undefined;
+                return (
+                  <div key={p.name} className="rounded-xl border border-neutral-200 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm font-medium text-neutral-800">{p.name}</span>
+                      <span className="text-xs text-neutral-400">range {p.min} – {p.max}</span>
+                    </div>
+                    {p.note ? <p className="mt-0.5 text-xs text-neutral-400">{p.note}</p> : null}
+                    {isManip ? (
+                      <div className="mt-2 flex items-center gap-2 text-sm">
+                        <span className="rounded px-1.5 py-0.5 text-[11px] font-medium text-white" style={{ backgroundColor: ACCENT }}>Manipulated in Study Design</span>
+                        <span className="text-neutral-600">{manip || "set as an IV"}</span>
+                      </div>
+                    ) : (
+                      <div className="mt-2 flex items-center gap-2 text-sm">
+                        <span className="text-neutral-500">Value:</span>
+                        <input
+                          type="number"
+                          value={cogCfg[p.name] ?? ""}
+                          onChange={(e) => setCog(p.name, e.target.value)}
+                          placeholder={`${p.min} – ${p.max}`}
+                          className="w-28 border-0 border-b border-neutral-200 bg-transparent px-0 py-0.5 text-[15px] text-neutral-900 outline-none placeholder:text-neutral-400 focus:border-neutral-500"
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <p className="mt-1.5 text-xs text-neutral-400">Leave blank to use the model’s default. Parameters manipulated as an IV in Study Design are shown here and stay in sync — set their range on the Study Design page.</p>
+          </div>
+        ) : null}
+
         <div>
           <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">ML proxy baselines · select any</p>
           <div className="space-y-2">
@@ -1115,6 +1182,57 @@ function UserModelBody({ answers, setAnswer }: { answers: Answers; setAnswer: (i
   );
 }
 
+function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
+  const a = answers;
+  const status = a.run_status || "idle"; // "idle" | "running" | "done"
+  const [note, setNote] = useState("");
+
+  function run() {
+    setAnswer("run_status", "running");
+    // Placeholder: no real execution yet.
+    window.setTimeout(() => setAnswer("run_status", "done"), 1200);
+  }
+
+  return (
+    <div className="mx-auto w-full max-w-2xl px-6 py-10">
+      <h1 className="text-2xl font-semibold tracking-tight">Results & report</h1>
+      <p className="mt-1 text-sm text-neutral-500">Run the experiment, then analyse results and generate a report here.</p>
+
+      <div className="mt-6 rounded-xl border border-neutral-200 p-4" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={run}
+            disabled={status === "running"}
+            className="inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50"
+            style={{ backgroundColor: ACCENT }}
+          >
+            <Play className="h-4 w-4" /> {status === "running" ? "Running…" : "Run experiment"}
+          </button>
+          {status === "done" ? <span className="text-sm text-neutral-500">Run complete (placeholder).</span> : null}
+        </div>
+        <p className="mt-2 text-xs text-neutral-400">Runs the configured user model / proxies against the design. Execution is a placeholder for now.</p>
+      </div>
+
+      <div className="mt-6">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Analysis &amp; report</p>
+          <Button variant="outline" size="sm" onClick={() => setNote("Report export is a placeholder for now — run the experiment first.")}>
+            <Download className="mr-1 h-4 w-4" /> Export report
+          </Button>
+        </div>
+        {note ? <p className="mb-2 text-xs text-neutral-400">{note}</p> : null}
+        <div className="grid min-h-[280px] place-items-center rounded-xl border border-dashed border-neutral-300 bg-neutral-50/50 p-6 text-center">
+          <div>
+            <BarChart3 className="mx-auto h-8 w-8 text-neutral-300" />
+            <p className="mt-2 text-sm font-medium text-neutral-500">No results yet</p>
+            <p className="mt-1 text-xs text-neutral-400">After a run, analysis and the generated report will appear here.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ----------------------------- Review & export ----------------------------- */
 
 function ivSummaryLines(a: Answers): string[] {
@@ -1129,6 +1247,12 @@ function ivSummaryLines(a: Answers): string[] {
 
 function mlProxyNames(a: Answers): string {
   return parseIdList(a.ml_proxies).map((id) => USER_MODELS.find((m) => m.id === id)?.name ?? id).join(", ");
+}
+
+function cogConfigSummary(a: Answers): string {
+  let obj: Record<string, string> = {};
+  try { obj = JSON.parse(a.cog_config || "{}"); } catch { obj = {}; }
+  return Object.entries(obj).filter(([, v]) => String(v).trim()).map(([k, v]) => `${k}=${v}`).join(", ");
 }
 
 function participantTotals(a: Answers) {
@@ -1175,7 +1299,8 @@ function buildExportText(a: Answers): string {
     ...(parseProcSteps(a.proc_steps).length ? procStepsSummary(parseProcSteps(a.proc_steps)) : ["(no steps)"]),
     "",
     "USER MODEL", v("user_model"),
-    `ML proxy baselines: ${mlProxyNames(a) || "(none)"}`, "",
+    `ML proxy baselines: ${mlProxyNames(a) || "(none)"}`,
+    `Cognitive config: ${cogConfigSummary(a) || "(defaults)"}`, "",
   ].join("\n");
 }
 
@@ -1213,6 +1338,7 @@ function buildExportJson(a: Answers): string {
     procedure: parseProcSteps(a.proc_steps),
     userModel: t("user_model"),
     mlProxyBaselines: parseIdList(a.ml_proxies),
+    cognitiveConfig: (() => { try { return JSON.parse(a.cog_config || "{}"); } catch { return {}; } })(),
     _rawAnswers: a,
   };
   return JSON.stringify(obj, null, 2);
@@ -1262,6 +1388,7 @@ function buildExportDoc(a: Answers): string {
     <h2>User Model</h2>
     <p>${t("user_model")}</p>
     ${mlProxyNames(a) ? `<p><b>ML proxy baselines:</b> ${esc(mlProxyNames(a))}</p>` : ""}
+    ${cogConfigSummary(a) ? `<p><b>Cognitive config:</b> ${esc(cogConfigSummary(a))}</p>` : ""}
   `;
   return `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>Experiment Design</title><style>
     body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1f2937;}
@@ -1379,6 +1506,7 @@ function ReviewPage({ answers, onJump }: { answers: Answers; onJump: (id: string
         <RSection title="User Model" done={isPageComplete(PAGES[4], a)} onJump={() => onJump("usermodel")}>
           <RRow label="User model" value={a.user_model} />
           <RRow label="ML proxy baselines" value={mlProxyNames(a)} />
+          <RRow label="Cognitive config" value={cogConfigSummary(a)} />
         </RSection>
       </div>
     </div>
@@ -1396,10 +1524,11 @@ const ALL_FILLABLE = [
   "proc_steps",
   "user_model",
   "ml_proxies",
+  "cog_config",
 ];
 const APPLY_KEYS = new Set(ALL_FILLABLE);
 // Keys whose APPLY value is a JSON array/object rather than a plain string.
-const STRUCTURED_APPLY = new Set(["sd_ivs", "sd_dv", "sd_cv", "sd_rv", "proc_steps", "ml_proxies"]);
+const STRUCTURED_APPLY = new Set(["sd_ivs", "sd_dv", "sd_cv", "sd_rv", "proc_steps", "ml_proxies", "cog_config"]);
 
 const OP_TARGETS = new Set(["sd_dv", "sd_ivs", "sd_cv", "sd_rv", "proc_steps"]);
 const OP_KINDS = new Set(["add", "update", "remove", "replace", "set"]);
@@ -1573,6 +1702,7 @@ function buildChatContext(page: Page, a: Answers): string {
   lines.push(`- independent variables: ${ivLine}`);
   lines.push(`- procedure steps: ${procLine}`);
   lines.push(`- ML proxy baselines: ${mlProxyNames(a) || "(none)"}`);
+  lines.push(`- cognitive config: ${cogConfigSummary(a) || "(defaults)"}`);
   const overview = lines.join("\n");
 
   const pageFields = cfg.fields.length ? cfg.fields.join(", ") : "(this page's structure is edited in the UI)";
