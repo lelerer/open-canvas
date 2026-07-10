@@ -42,7 +42,7 @@ export const DATASET_OPTIONS = [
   "Cardiotocography",
 ];
 
-// ---- User models (cognitive models + ML proxies) ----
+// ---- User models (cognitive models + comparison baselines) ----
 // NOTE: full names / descriptions below are placeholders — please replace with the
 // authoritative text. Users can also add their own at runtime (stored locally).
 export interface UserModel {
@@ -50,7 +50,7 @@ export interface UserModel {
   name: string;
   full: string;
   description: string;
-  category: string; // "Cognitive model" | "ML proxy" | "Custom"
+  category: string; // "Cognitive model" | "Comparison baseline" | "Custom"
 }
 
 // tolerant parse for a stored list of ids (JSON array or comma-separated)
@@ -64,12 +64,12 @@ export function parseIdList(raw: string | undefined): string[] {
 export const USER_MODELS: UserModel[] = [
   { id: "CoAX", name: "CoAX", full: "CoAX — full name TBC", description: "Cognitive user model (please add a 1–2 line description).", category: "Cognitive model" },
   { id: "CoXAM", name: "CoXAM", full: "CoXAM — full name TBC", description: "Cognitive user model (please add a 1–2 line description).", category: "Cognitive model" },
-  // ML proxies:
-  { id: "KNN", name: "KNN", full: "k-Nearest Neighbours", description: "General ML proxy — applies to both CoAX and CoXAM.", category: "ML proxy" },
-  { id: "Decision Tree", name: "Decision Tree", full: "Decision tree", description: "General ML proxy — applies to both CoAX and CoXAM.", category: "ML proxy" },
-  { id: "MLP", name: "MLP", full: "Multi-layer perceptron", description: "ML proxy for CoAX.", category: "ML proxy" },
-  { id: "Linear Regression", name: "Linear Regression", full: "Linear regression", description: "ML proxy for CoXAM — forward simulation.", category: "ML proxy" },
-  { id: "Global SHAP", name: "Global SHAP", full: "Global SHAP", description: "ML proxy for CoXAM — counterfactual simulation.", category: "ML proxy" },
+  // Comparison baselines (simple standard models run alongside for comparison):
+  { id: "KNN", name: "KNN", full: "k-Nearest Neighbours", description: "A simple, standard model used as a comparison baseline. Works with both CoAX and CoXAM.", category: "Comparison baseline" },
+  { id: "Decision Tree", name: "Decision Tree", full: "Decision tree", description: "A simple, standard model used as a comparison baseline. Works with both CoAX and CoXAM.", category: "Comparison baseline" },
+  { id: "MLP", name: "MLP", full: "Multi-layer perceptron", description: "A standard model used as a comparison baseline for CoAX.", category: "Comparison baseline" },
+  { id: "Linear Regression", name: "Linear Regression", full: "Linear regression", description: "A standard comparison baseline for CoXAM (forward simulation).", category: "Comparison baseline" },
+  { id: "Global SHAP", name: "Global SHAP", full: "Global SHAP", description: "A standard comparison baseline for CoXAM (counterfactual simulation).", category: "Comparison baseline" },
 ];
 
 export const DESIGN_TYPES = ["Within-subjects", "Between-subjects", "Mixed"] as const;

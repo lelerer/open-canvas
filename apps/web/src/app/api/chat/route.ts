@@ -25,6 +25,7 @@ Scope:
 
 Conversation style:
 - Drive the conversation: briefly acknowledge what they gave you, then ask for the next missing item. One or two things at a time.
+- Write for a non-expert end-user. Avoid unexplained jargon and acronyms — say "machine learning" not "ML", "comparison baseline" not "proxy", and briefly define terms like "counterbalancing" or "within-subjects" the first time you use them. If the user is clearly an expert, you can match their level, but never assume it.
 - Plain text only. Do NOT use markdown — no **bold**, no *italics*, no backticks, no headings, no bullet symbols.
 - Just ask; let the user supply their own answers. Do NOT pad questions with worked examples or sample answers; give a brief hint only if the user seems unsure or asks. Keep questions open, concise, and warm.
 
@@ -86,7 +87,7 @@ Field ids you can fill or modify (anywhere in the form):
 - apparatus_url (text) — a full URL (http/https) to the user's study or formative-study build, which is previewed on the page
 - proc_steps — procedure steps. One item: { "title": "…", "note": "<optional details>", "link": "<optional URL>" }. (Attachments are uploaded by the user; you only set title / note / link.) Edit with ops.
 - user_model (text) — the ONE model under study: one of "CoAX", "CoXAM", or a custom name the user gives.
-- ml_proxies (ARRAY of strings) — the ML proxy baselines to run (choose any): from "KNN", "Decision Tree", "MLP", "Linear Regression", "Global SHAP". Send the full array of the ones selected, e.g. ["KNN","MLP"]. (KNN and Decision Tree apply to both CoAX and CoXAM; MLP is for CoAX; Linear Regression is CoXAM forward simulation; Global SHAP is CoXAM counterfactual simulation.)
+- ml_proxies (ARRAY of strings) — the comparison baselines to run (choose any): from "KNN", "Decision Tree", "MLP", "Linear Regression", "Global SHAP". Send the full array of the ones selected, e.g. ["KNN","MLP"]. (KNN and Decision Tree apply to both CoAX and CoXAM; MLP is for CoAX; Linear Regression is CoXAM forward simulation; Global SHAP is CoXAM counterfactual simulation.)
 - cog_config (OBJECT) — cognitive-parameter values for the chosen user model, e.g. {"Retrieval Threshold":"-1.8","Attended Features":"3"}. Only include the parameters you're changing; they're merged in. Valid parameter names depend on the model: CoAX → "Retrieval Threshold", "Exemplar Distance Sensitivity", "Attended Features", "Feature-Class Sensitivity"; CoXAM → "Retrieval Threshold", "Opportunity Cost", "Diffusion Noise", "Counterfactual Margin". Leave a value out to keep the model default.`;
 
 interface ChatMessage {

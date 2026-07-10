@@ -1145,7 +1145,7 @@ function UserModelBody({ answers, setAnswer }: { answers: Answers; setAnswer: (i
 
   const all = [...USER_MODELS, ...customs];
   const userModels = all.filter((m) => m.category === "Cognitive model" || m.category === "Custom");
-  const proxies = all.filter((m) => m.category === "ML proxy");
+  const proxies = all.filter((m) => m.category === "Comparison baseline");
   const selectedProxies = parseIdList(a.ml_proxies);
 
   function toggleProxy(id: string) {
@@ -1189,7 +1189,7 @@ function UserModelBody({ answers, setAnswer }: { answers: Answers; setAnswer: (i
       <h1 className="text-2xl font-semibold leading-snug tracking-tight">
         User model{" "}
         <InfoTip>
-          A <span className="font-medium text-neutral-800">user model</span> is a stand-in for a human participant — a program that simulates how a person would read the explanations and make decisions, so you can pilot the study without recruiting people yet. Pick the <span className="font-medium text-neutral-800">one</span> you're studying. <span className="font-medium text-neutral-800">Machine-learning (ML) proxies</span> are simpler off-the-shelf models (e.g. k-nearest-neighbours) used as comparison baselines.
+          A <span className="font-medium text-neutral-800">user model</span> is a stand-in for a human participant — a program that simulates how a person would read the explanations and make decisions, so you can pilot the study without recruiting people yet. Pick the <span className="font-medium text-neutral-800">one</span> you're studying. <span className="font-medium text-neutral-800">Comparison baselines</span> are simpler, standard models (e.g. k-nearest-neighbours) you run alongside to compare against.
         </InfoTip>
       </h1>
       <p className="mt-1 text-sm text-neutral-400">Pick the model you're studying, plus any baselines to compare against.</p>
@@ -1251,7 +1251,7 @@ function UserModelBody({ answers, setAnswer }: { answers: Answers; setAnswer: (i
         ) : null}
 
         <div>
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Machine-learning (ML) proxy baselines · select any</p>
+          <div className="mb-2 flex items-center gap-1.5"><p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Comparison baselines · select any</p><InfoTip>Simple, standard models (e.g. k-nearest-neighbours) run alongside your user model so you have something to compare its behaviour against. Optional.</InfoTip></div>
           <div className="space-y-2">
             {proxies.map((m) => (
               <Card key={m.id} m={m} multi on={selectedProxies.includes(m.id)} onClick={() => toggleProxy(m.id)} />
@@ -1399,7 +1399,7 @@ function buildExportText(a: Answers): string {
     ...(parseProcSteps(a.proc_steps).length ? procStepsSummary(parseProcSteps(a.proc_steps)) : ["(no steps)"]),
     "",
     "USER MODEL", v("user_model"),
-    `ML proxy baselines: ${mlProxyNames(a) || "(none)"}`,
+    `Comparison baselines: ${mlProxyNames(a) || "(none)"}`,
     `Cognitive config: ${cogConfigSummary(a) || "(defaults)"}`, "",
   ].join("\n");
 }
@@ -1487,7 +1487,7 @@ function buildExportDoc(a: Answers): string {
     ${parseProcSteps(a.proc_steps).length ? "<ol>" + parseProcSteps(a.proc_steps).filter((st) => (st.title || "").trim()).map((st) => `<li>${esc(st.title)}${(st.note || "").trim() ? ` — ${esc(st.note || "")}` : ""}${st.attachment ? ` (file: ${esc(st.attachment)})` : ""}${st.link ? ` (<a href="${esc(st.link)}">link</a>)` : ""}</li>`).join("") + "</ol>" : "<p><i>(no steps)</i></p>"}
     <h2>User Model</h2>
     <p>${t("user_model")}</p>
-    ${mlProxyNames(a) ? `<p><b>ML proxy baselines:</b> ${esc(mlProxyNames(a))}</p>` : ""}
+    ${mlProxyNames(a) ? `<p><b>Comparison baselines:</b> ${esc(mlProxyNames(a))}</p>` : ""}
     ${cogConfigSummary(a) ? `<p><b>Cognitive config:</b> ${esc(cogConfigSummary(a))}</p>` : ""}
   `;
   return `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>Experiment Design</title><style>
@@ -1605,7 +1605,7 @@ function ReviewPage({ answers, onJump }: { answers: Answers; onJump: (id: string
         </RSection>
         <RSection title="User Model" done={isPageComplete(PAGES[4], a)} onJump={() => onJump("usermodel")}>
           <RRow label="User model" value={a.user_model} />
-          <RRow label="ML proxy baselines" value={mlProxyNames(a)} />
+          <RRow label="Comparison baselines" value={mlProxyNames(a)} />
           <RRow label="Cognitive config" value={cogConfigSummary(a)} />
         </RSection>
       </div>
@@ -1772,7 +1772,7 @@ const PAGE_CHAT: Record<string, { focus: string; fields: string[] }> = {
     fields: [],
   },
   usermodel: {
-    focus: "the user model — a cognitive model or ML proxy; the user picks one from the list (you cannot set it yourself, but help them choose)",
+    focus: "the user model — a cognitive model, plus optional comparison baselines; the user picks from the list (you can help them choose)",
     fields: [],
   },
   review: {
@@ -1801,7 +1801,7 @@ function buildChatContext(page: Page, a: Answers): string {
   lines.push(`- random variables (RV): ${varsSummary(parseVars(a.sd_rv)) || "(empty)"}`);
   lines.push(`- independent variables: ${ivLine}`);
   lines.push(`- procedure steps: ${procLine}`);
-  lines.push(`- ML proxy baselines: ${mlProxyNames(a) || "(none)"}`);
+  lines.push(`- comparison baselines: ${mlProxyNames(a) || "(none)"}`);
   lines.push(`- cognitive config: ${cogConfigSummary(a) || "(defaults)"}`);
   const overview = lines.join("\n");
 
