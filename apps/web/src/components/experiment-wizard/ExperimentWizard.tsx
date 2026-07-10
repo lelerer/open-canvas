@@ -13,6 +13,7 @@ import {
   Upload,
   Play,
   BarChart3,
+  Info,
   X,
   Plus,
 } from "lucide-react";
@@ -69,6 +70,17 @@ const ACCENT = "#359793";
 const SERIF = 'Georgia, Cambria, "Times New Roman", serif';
 // Common variable types suggested for CV / RV (the field still accepts custom text).
 const COMMON_VAR_TYPES = ["Numerical (continuous)", "Numerical (discrete)", "Categorical (nominal)", "Ordinal", "Binary", "Count", "Boolean", "Text / free response"];
+
+// Validate a numeric range against allowed bounds; returns human-readable errors.
+function rangeErrors(minS: string, maxS: string, lo: number, hi: number): string[] {
+  const errs: string[] = [];
+  const min = (minS ?? "").trim() === "" ? null : parseFloat(minS);
+  const max = (maxS ?? "").trim() === "" ? null : parseFloat(maxS);
+  if (min != null && (Number.isNaN(min) || min < lo || min > hi)) errs.push(`Start must be between ${lo} and ${hi}.`);
+  if (max != null && (Number.isNaN(max) || max < lo || max > hi)) errs.push(`End must be between ${lo} and ${hi}.`);
+  if (min != null && max != null && !Number.isNaN(min) && !Number.isNaN(max) && min > max) errs.push("Start must be ≤ end.");
+  return errs;
+}
 const LAST = PAGES.length - 1;
 
 const GLOBAL_OPENING =
@@ -243,10 +255,38 @@ export function ExperimentWizard() {
 
 /* ----------------------------- Page bodies (editable) ----------------------------- */
 
+// Small info affordance: an "i" icon that reveals an explanation on hover / click.
+function InfoTip({ children, label = "What's this?" }: { children: ReactNode; label?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative inline-block align-middle">
+      <button
+        type="button"
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onClick={() => setOpen((o) => !o)}
+        aria-label={label}
+        className="grid h-[18px] w-[18px] place-items-center rounded-full text-white shadow-sm transition-transform hover:scale-110"
+        style={{ backgroundColor: ACCENT }}
+      >
+        <Info className="h-3 w-3" strokeWidth={2.5} />
+      </button>
+      {open ? (
+        <span
+          className="absolute left-0 top-7 z-30 block w-80 max-w-[90vw] rounded-lg border border-neutral-200 bg-white p-3 text-left text-sm font-normal leading-relaxed text-neutral-600 shadow-xl"
+          style={{ fontFamily: "ui-sans-serif, system-ui" }}
+        >
+          {children}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 function TextBody({ page, answers, setAnswer }: { page: Page; answers: Answers; setAnswer: (id: string, v: string) => void }) {
   return (
     <>
-      <h1 className="text-2xl font-semibold leading-snug tracking-tight">{page.prompt}</h1>
+      <h1 className="text-2xl font-semibold leading-snug tracking-tight">{page.prompt}{page.subtitle ? <> <InfoTip>{page.subtitle}</InfoTip></> : null}</h1>
       {page.hints && page.hints.length > 0 && (
         <ul className="mt-3 space-y-1">
           {page.hints.map((h, i) => (
@@ -275,7 +315,7 @@ function ApparatusBody({ page, answers, setAnswer }: { page: Page; answers: Answ
   const safe = /^https?:\/\//i.test(url);
   return (
     <>
-      <h1 className="text-2xl font-semibold leading-snug tracking-tight">{page.prompt}</h1>
+      <h1 className="text-2xl font-semibold leading-snug tracking-tight">{page.prompt}{page.subtitle ? <> <InfoTip>{page.subtitle}</InfoTip></> : null}</h1>
       {page.hints && page.hints.length > 0 && (
         <ul className="mt-3 space-y-1">
           {page.hints.map((h, i) => (
@@ -346,9 +386,23 @@ function ProcedureBody({ page, answers, setAnswer }: { page: Page; answers: Answ
 
   const inputCls = "w-full border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none placeholder:text-neutral-300 focus:border-neutral-500";
 
+  // Common HCI/XAI backbone — a scaffold the user can start from and adapt.
+  const TYPICAL_STEPS: ProcStep[] = [
+    { title: "Welcome & consent", note: "Greet the participant, explain the study, and collect informed consent." },
+    { title: "Demographics questionnaire", note: "Short background questions (e.g. age range, AI familiarity)." },
+    { title: "Training / practice", note: "Walk through the interface with a few practice trials so the task is understood before it counts." },
+    { title: "Main task (trials)", note: "The core trials where your dependent variables are collected, in the counterbalanced order from Study Design." },
+    { title: "Post-task questionnaire", note: "Self-report measures (e.g. trust, workload, satisfaction)." },
+    { title: "Debrief", note: "Explain the study's purpose, answer questions, and thank the participant." },
+  ];
+  function seedTypical() {
+    if (steps.some((s) => (s.title || "").trim()) && !window.confirm("Replace the current steps with a typical structure?")) return;
+    save(TYPICAL_STEPS);
+  }
+
   return (
     <>
-      <h1 className="text-2xl font-semibold leading-snug tracking-tight">{page.prompt}</h1>
+      <h1 className="text-2xl font-semibold leading-snug tracking-tight">{page.prompt}{page.subtitle ? <> <InfoTip>{page.subtitle}</InfoTip></> : null}</h1>
       {page.hints && page.hints.length > 0 && (
         <ul className="mt-3 space-y-1">
           {page.hints.map((h, i) => (
@@ -358,7 +412,14 @@ function ProcedureBody({ page, answers, setAnswer }: { page: Page; answers: Answ
       )}
 
       <div className="mt-5 space-y-3" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
-        {steps.length === 0 ? <p className="text-sm text-neutral-400">No steps yet — add the first one below.</p> : null}
+        {steps.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-neutral-300 bg-neutral-50/60 p-4 text-sm text-neutral-600">
+            <p>No steps yet. Start from the typical HCI/XAI structure and edit it, or add steps one by one.</p>
+            <button onClick={seedTypical} className="mt-2 inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-white" style={{ backgroundColor: ACCENT }}>
+              <Wand2 className="h-4 w-4" /> Start from a typical structure
+            </button>
+          </div>
+        ) : null}
 
         {steps.map((s, i) => (
           <div key={i} className="rounded-lg border border-neutral-200 bg-white p-3">
@@ -416,9 +477,16 @@ function ProcedureBody({ page, answers, setAnswer }: { page: Page; answers: Answ
           {PROC_STEP_TYPES.map((t) => (<option key={t} value={t} />))}
         </datalist>
 
-        <button type="button" onClick={add} className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:bg-neutral-50">
-          <Plus className="h-4 w-4" /> Add step
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={add} className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:bg-neutral-50">
+            <Plus className="h-4 w-4" /> Add step
+          </button>
+          {steps.length ? (
+            <button type="button" onClick={seedTypical} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium" style={{ color: ACCENT }}>
+              <Wand2 className="h-4 w-4" /> Reset to typical structure
+            </button>
+          ) : null}
+        </div>
       </div>
     </>
   );
@@ -451,8 +519,13 @@ function TextInput({ value, onChange, placeholder, type = "text" }: { value: str
   );
 }
 
-function DocLabel({ children }: { children: ReactNode }) {
-  return <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">{children}</p>;
+function DocLabel({ children, tip }: { children: ReactNode; tip?: ReactNode }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">{children}</p>
+      {tip ? <InfoTip>{tip}</InfoTip> : null}
+    </div>
+  );
 }
 
 // Borderless, document-style inputs: read like prose, underline only on focus.
@@ -492,29 +565,32 @@ function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setAnswer: 
 
   return (
     <div style={{ fontFamily: SERIF }}>
-      <h1 className="text-2xl font-semibold leading-snug tracking-tight" style={{ fontFamily: "ui-sans-serif, system-ui" }}>Study design</h1>
-      <p className="mt-1 text-sm text-neutral-400" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
-        Describe the variables, structure, and participants. Type directly, or let the assistant fill it in.
-      </p>
+      <h1 className="text-2xl font-semibold leading-snug tracking-tight" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+        Study design{" "}
+        <InfoTip>
+          This is the heart of the experiment: what you <span className="font-medium text-neutral-800">measure</span>, what you <span className="font-medium text-neutral-800">change on purpose</span>, and what you <span className="font-medium text-neutral-800">keep the same</span> so any difference in results can be attributed to your manipulation. Each section below has its own ⓘ for what it means.
+        </InfoTip>
+      </h1>
+      <p className="mt-1 text-sm text-neutral-400" style={{ fontFamily: "ui-sans-serif, system-ui" }}>Define what you measure, change, and hold constant. Type directly, or let the assistant fill it in.</p>
 
       <div className="mt-8 space-y-7">
         <div>
-          <DocLabel>Dependent Variables (DV)</DocLabel>
+          <DocLabel tip={<span>The outcome you <span className="font-medium text-neutral-800">measure</span> — e.g. accuracy, decision time, trust. This is what your research question is really about. Pick from the list or define a custom one with a formula.</span>}>Dependent Variables (DV)</DocLabel>
           <DvBuilder answers={answers} setAnswer={setAnswer} />
         </div>
 
         <div>
-          <DocLabel>Independent Variable(s)</DocLabel>
+          <DocLabel tip={<span>What you <span className="font-medium text-neutral-800">deliberately vary</span> across conditions (e.g. explanation vs none). Each IV and its levels create the conditions participants are split across.</span>}>Independent Variable(s)</DocLabel>
           <IvBuilder answers={answers} setAnswer={setAnswer} />
         </div>
 
         <div>
-          <DocLabel>Control Variables (CV)</DocLabel>
+          <DocLabel tip={<span>Things you <span className="font-medium text-neutral-800">hold constant</span> across every condition so they can't be an alternative explanation for your results (e.g. same dataset, same device).</span>}>Control Variables (CV)</DocLabel>
           <VariableList valueKey="sd_cv" answers={answers} setAnswer={setAnswer} namePlaceholder="e.g. dataset" />
         </div>
 
         <div>
-          <DocLabel>Random Variables (RV)</DocLabel>
+          <DocLabel tip={<span>Things that <span className="font-medium text-neutral-800">vary between people or trials but aren't controlled</span> — e.g. the participant, or the order trials happen to appear in.</span>}>Random Variables (RV)</DocLabel>
           <VariableList valueKey="sd_rv" answers={answers} setAnswer={setAnswer} namePlaceholder="e.g. participant, stimulus order" />
         </div>
 
@@ -821,13 +897,19 @@ function IvLevelEditor({ factor, entry, agent, onPatch }: { factor: IvFactor; en
         <p className="text-sm text-neutral-600">Comparing <span className="font-medium text-neutral-800">{factor.binary[0]}</span> vs <span className="font-medium text-neutral-800">{factor.binary[1]}</span> (2 conditions).</p>
       ) : null}
 
-      {factor.kind === "range" && factor.range ? (
-        <p className="text-sm text-neutral-600">
-          From <input type="number" value={entry.min ?? ""} onChange={(e) => setRange(e.target.value, entry.max ?? "")} placeholder={String(factor.range.min)} className={numCls} /> to{" "}
-          <input type="number" value={entry.max ?? ""} onChange={(e) => setRange(entry.min ?? "", e.target.value)} placeholder={String(factor.range.max)} className={numCls} />{" "}
-          <span className="text-neutral-400">(allowed {factor.range.min}\u2013{factor.range.max})</span>
-        </p>
-      ) : null}
+      {factor.kind === "range" && factor.range ? (() => {
+        const errs = rangeErrors(entry.min ?? "", entry.max ?? "", factor.range.min, factor.range.max);
+        return (
+          <div className="text-sm text-neutral-600">
+            <p>
+              From <input type="number" value={entry.min ?? ""} onChange={(e) => setRange(e.target.value, entry.max ?? "")} placeholder={String(factor.range.min)} className={numCls} /> to{" "}
+              <input type="number" value={entry.max ?? ""} onChange={(e) => setRange(entry.min ?? "", e.target.value)} placeholder={String(factor.range.max)} className={numCls} />{" "}
+              <span className="text-neutral-400">(allowed {factor.range.min}–{factor.range.max})</span>
+            </p>
+            {errs.length ? <p className="mt-1 text-xs font-medium text-red-600">{errs.join(" ")}</p> : null}
+          </div>
+        );
+      })() : null}
 
       {factor.kind === "cognitive" ? (
         <div className="space-y-2">
@@ -840,13 +922,19 @@ function IvLevelEditor({ factor, entry, agent, onPatch }: { factor: IvFactor; en
           {cogParam ? (
             <div className="text-sm text-neutral-600">
               {cogParam.note ? <p className="mb-1 text-xs text-neutral-400">{cogParam.note}</p> : null}
-              {cogParam.min < cogParam.max ? (
-                <p>
-                  From <input type="number" value={entry.min ?? ""} onChange={(e) => setRange(e.target.value, entry.max ?? "")} placeholder={String(cogParam.min)} className={numCls} /> to{" "}
-                  <input type="number" value={entry.max ?? ""} onChange={(e) => setRange(entry.min ?? "", e.target.value)} placeholder={String(cogParam.max)} className={numCls} />{" "}
-                  <span className="text-neutral-400">(allowed {cogParam.min} to {cogParam.max})</span>
-                </p>
-              ) : (
+              {cogParam.min < cogParam.max ? (() => {
+                const errs = rangeErrors(entry.min ?? "", entry.max ?? "", cogParam.min, cogParam.max);
+                return (
+                  <div>
+                    <p>
+                      From <input type="number" value={entry.min ?? ""} onChange={(e) => setRange(e.target.value, entry.max ?? "")} placeholder={String(cogParam.min)} className={numCls} /> to{" "}
+                      <input type="number" value={entry.max ?? ""} onChange={(e) => setRange(entry.min ?? "", e.target.value)} placeholder={String(cogParam.max)} className={numCls} />{" "}
+                      <span className="text-neutral-400">(allowed {cogParam.min} to {cogParam.max})</span>
+                    </p>
+                    {errs.length ? <p className="mt-1 text-xs font-medium text-red-600">{errs.join(" ")}</p> : null}
+                  </div>
+                );
+              })() : (
                 <input value={entry.levels ?? ""} onChange={(e) => onPatch({ levels: e.target.value })} placeholder="e.g. top-2 features vs all features" className="w-full border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none placeholder:text-neutral-400 focus:border-neutral-500" />
               )}
             </div>
@@ -1098,8 +1186,13 @@ function UserModelBody({ answers, setAnswer }: { answers: Answers; setAnswer: (i
 
   return (
     <>
-      <h1 className="text-2xl font-semibold leading-snug tracking-tight">User model</h1>
-      <p className="mt-2 text-sm text-neutral-500">Choose the model that stands in for the user, and any ML proxies to run as baselines.</p>
+      <h1 className="text-2xl font-semibold leading-snug tracking-tight">
+        User model{" "}
+        <InfoTip>
+          A <span className="font-medium text-neutral-800">user model</span> is a stand-in for a human participant — a program that simulates how a person would read the explanations and make decisions, so you can pilot the study without recruiting people yet. Pick the <span className="font-medium text-neutral-800">one</span> you're studying. <span className="font-medium text-neutral-800">Machine-learning (ML) proxies</span> are simpler off-the-shelf models (e.g. k-nearest-neighbours) used as comparison baselines.
+        </InfoTip>
+      </h1>
+      <p className="mt-1 text-sm text-neutral-400">Pick the model you're studying, plus any baselines to compare against.</p>
 
       <div className="mt-6 space-y-6">
         <div>
@@ -1130,18 +1223,25 @@ function UserModelBody({ answers, setAnswer }: { answers: Answers; setAnswer: (i
                         <span className="rounded px-1.5 py-0.5 text-[11px] font-medium text-white" style={{ backgroundColor: ACCENT }}>Manipulated in Study Design</span>
                         <span className="text-neutral-600">{manip || "set as an IV"}</span>
                       </div>
-                    ) : (
-                      <div className="mt-2 flex items-center gap-2 text-sm">
-                        <span className="text-neutral-500">Value:</span>
-                        <input
-                          type="number"
-                          value={cogCfg[p.name] ?? ""}
-                          onChange={(e) => setCog(p.name, e.target.value)}
-                          placeholder={`${p.min} – ${p.max}`}
-                          className="w-28 border-0 border-b border-neutral-200 bg-transparent px-0 py-0.5 text-[15px] text-neutral-900 outline-none placeholder:text-neutral-400 focus:border-neutral-500"
-                        />
-                      </div>
-                    )}
+                    ) : (() => {
+                      const v = cogCfg[p.name] ?? "";
+                      const bad = v.trim() !== "" && (Number.isNaN(parseFloat(v)) || parseFloat(v) < p.min || parseFloat(v) > p.max);
+                      return (
+                        <div>
+                          <div className="mt-2 flex items-center gap-2 text-sm">
+                            <span className="text-neutral-500">Value:</span>
+                            <input
+                              type="number"
+                              value={v}
+                              onChange={(e) => setCog(p.name, e.target.value)}
+                              placeholder={`${p.min} – ${p.max}`}
+                              className={cn("w-28 border-0 border-b bg-transparent px-0 py-0.5 text-[15px] text-neutral-900 outline-none placeholder:text-neutral-400", bad ? "border-red-400 focus:border-red-500" : "border-neutral-200 focus:border-neutral-500")}
+                            />
+                          </div>
+                          {bad ? <p className="mt-1 text-xs font-medium text-red-600">Value must be between {p.min} and {p.max}.</p> : null}
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })}
@@ -1151,7 +1251,7 @@ function UserModelBody({ answers, setAnswer }: { answers: Answers; setAnswer: (i
         ) : null}
 
         <div>
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">ML proxy baselines · select any</p>
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Machine-learning (ML) proxy baselines · select any</p>
           <div className="space-y-2">
             {proxies.map((m) => (
               <Card key={m.id} m={m} multi on={selectedProxies.includes(m.id)} onClick={() => toggleProxy(m.id)} />
@@ -1706,12 +1806,16 @@ function buildChatContext(page: Page, a: Answers): string {
   const overview = lines.join("\n");
 
   const pageFields = cfg.fields.length ? cfg.fields.join(", ") : "(this page's structure is edited in the UI)";
+  const idx = PAGES.findIndex((p) => p.id === page.id);
+  const order = PAGES.map((p) => p.navTitle).join(" → ");
+  const nextPage = idx >= 0 && idx < PAGES.length - 1 ? PAGES[idx + 1].navTitle : null;
 
   return [
     `Whole design so far (all sections):\n${overview}`,
-    `Current page: ${page.navTitle}`,
+    `Section order (ALWAYS follow this when moving on — do not skip or reorder): ${order}.`,
+    `Current page: ${page.navTitle}.${nextPage ? ` When this page is done, the next section is "${nextPage}" — guide the user there, not any other section.` : " This is the last section."}`,
     `This page covers: ${cfg.focus}`,
-    `You can fill in or MODIFY any field in the whole form via the APPLY block — not just the current page. When the user asks to change something on another section, do it. For structured fields (sd_dv, sd_ivs, sd_cv, sd_rv, proc_steps) always send the COMPLETE updated list, since it replaces the old one.`,
+    `You can fill in or MODIFY any field in the whole form via the APPLY block — not just the current page. For structured fields (sd_dv, sd_ivs, sd_cv, sd_rv, proc_steps) prefer incremental ops (add/update/remove one item).`,
     `The current page is mainly about: ${pageFields}. Prioritise helping with that, but follow the user wherever they go.`,
   ].join("\n\n");
 }

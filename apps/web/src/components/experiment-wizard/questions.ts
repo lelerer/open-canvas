@@ -12,6 +12,7 @@ export interface Page {
   section: string; // eyebrow
   kind: PageKind;
   prompt?: string; // for text pages
+  subtitle?: string; // one-paragraph "why this matters / what it means"
   hints?: string[];
   placeholder?: string;
   required?: boolean; // gates generation unless Advanced mode
@@ -482,7 +483,8 @@ export const PAGES: Page[] = [
     section: "Section 1",
     kind: "text",
     prompt: "What are your research questions?",
-    hints: ["A rough direction is fine to start — the assistant can help shape it.", "List them as RQ1, RQ2, RQ3…", "Each should be clear and testable."],
+    subtitle: "Everything else in this tool exists to answer these questions — the variables you measure, the conditions you compare, and the task participants do. Writing them down first keeps the rest of the design focused. A good research question names what you're comparing and what outcome you expect it to change (e.g. \"Does showing feature-attribution explanations improve people's ability to catch the AI's mistakes, compared to no explanation?\").",
+    hints: ["A rough direction is fine to start — the assistant can help you sharpen it into a testable question.", "Number them RQ1, RQ2, … so you can refer back to them later.", "Testable = you could imagine a result that would answer it yes or no."],
     placeholder: "RQ1: …\nRQ2: …",
     required: true,
   },
@@ -498,16 +500,18 @@ export const PAGES: Page[] = [
     navTitle: "Apparatus",
     section: "Section 3",
     kind: "apparatus",
-    prompt: "What apparatus and materials will you use?",
-    hints: ["Devices, displays, software / toolkit.", "Paste a link to your study / formative-study build to preview it here."],
+    prompt: "What will participants actually use?",
+    subtitle: "\"Apparatus\" is the concrete setup a participant sits down to — the device and the software they interact with. \"Materials\" are the things you present to them (the interface, task instructions, questionnaires). The point of this page is reproducibility: enough detail that another researcher could rebuild your setup, and a live preview so you can confirm participants will see what you intend. You don't need to be a programmer — if your study runs in a browser, just paste its link.",
+    hints: ["Device & environment: e.g. \"14-inch laptop, Chrome, in a quiet lab room.\"", "Software: the app or web tool participants use — name it and what it does (a \"toolkit\" here just means a ready-made set of study components).", "If it's web-based, paste the link below to preview the exact screen participants will see."],
   },
   {
     id: "procedure",
     navTitle: "Procedure",
     section: "Section 4",
     kind: "procedure",
-    prompt: "Build the procedure, step by step.",
-    hints: ["Each step is one thing the participant does.", "Attach a consent form or questionnaire to a step if needed."],
+    prompt: "What happens in the session, step by step?",
+    subtitle: "This is the ordered sequence a participant goes through from arrival to departure. It matters because it's how your measures actually get collected and how you control for confounds (e.g. training before the real task, randomising order). Most HCI/XAI studies share a common backbone — consent → demographics → training/practice → main task (the trials) → post-task questionnaire → debrief — so you can start from that and adapt. Use \"Start from a typical structure\" below if you'd like a scaffold.",
+    hints: ["Each step is one thing the participant does; keep them in the order they'll happen.", "Add details per step (what they see, how long, any instructions).", "Attach a consent form or questionnaire to the step where participants complete it."],
   },
   {
     id: "usermodel",
