@@ -502,7 +502,7 @@ export const PAGES: Page[] = [
     kind: "apparatus",
     prompt: "What will participants actually use?",
     subtitle: "\"Apparatus\" is the concrete setup a participant sits down to — the device and the software they interact with. \"Materials\" are the things you present to them (the interface, task instructions, questionnaires). The point of this page is reproducibility: enough detail that another researcher could rebuild your setup, and a live preview so you can confirm participants will see what you intend. You don't need to be a programmer — if your study runs in a browser, just paste its link.",
-    hints: ["Device & environment: e.g. \"14-inch laptop, Chrome, in a quiet lab room.\"", "Software: the app or web tool participants use — name it and what it does (a \"toolkit\" here just means a ready-made set of study components).", "If it's web-based, paste the link below to preview the exact screen participants will see."],
+    hints: ["Add one configuration per participant group. For a between-subjects study, that's usually one per condition (e.g. one for each explanation type).", "Each configuration can use our built-in interface (customize the parameters) or your own (drop a URL).", "Assign each to a group with \"Used by\" — pick an IV level (e.g. \"XAI Type = Importance\") or \"All participants\"."],
   },
   {
     id: "procedure",
@@ -550,7 +550,7 @@ export function isPageComplete(page: Page, a: Answers): boolean {
     const dvOk = parseDvs(a.sd_dv).some((e) => dvDisplayName(e).trim());
     return dvOk && ivOk && has("sd_participants");
   }
-  if (page.kind === "apparatus") return has("apparatus") || has("apparatus_url");
+  if (page.kind === "apparatus") return parseApparatusList(a).some((e) => e.mode === "ours" || /^https?:\/\//i.test((e.url || "").trim()));
   if (page.kind === "procedure") return parseProcSteps(a.proc_steps).some((s) => (s.title || "").trim());
   if (page.kind === "usermodel") return has("user_model");
   return true; // review or unknown
@@ -645,4 +645,125 @@ export function buildTranscript(a: Answers): string {
   blocks.push(`Dataset & Agent\n${ds}`);
 
   return blocks.join("\n\n");
+}
+
+// ---- Answer-derived display helpers (used by chat + review) ----
+export function ivSummaryLines(a: Answers): string[] {
+  const ivs = parseIvs(a);
+  if (!ivs.length) return [];
+  return ivs.map((e, i) => {
+    const allocShort = e.alloc === "Between-subjects" ? "between" : "within";
+    const bal = e.alloc === "Within-subjects" && e.balancing ? `, ${e.balancing}` : "";
+    return `IV ${i + 1}: ${e.label || "(factor not set)"} — ${e.levels || "(no levels)"} [${allocShort}-subjects${bal}]`;
+  });
+}
+
+export function mlProxyNames(a: Answers): string {
+  return parseIdList(a.ml_proxies).map((id) => USER_MODELS.find((m) => m.id === id)?.name ?? id).join(", ");
+}
+
+export function cogConfigSummary(a: Answers): string {
+  let obj: Record<string, string> = {};
+  try { obj = JSON.parse(a.cog_config || "{}"); } catch { obj = {}; }
+  return Object.entries(obj).filter(([, v]) => String(v).trim()).map(([k, v]) => `${k}=${v}`).join(", ");
+}
+
+export function participantTotals(a: Answers) {
+  const ivs = parseIvs(a);
+  const per = parseInt(a.sd_participants || "", 10) || 0;
+  const between = betweenCells(ivs) || 1;
+  const cells = totalCells(ivs);
+  const totalP = per * between;
+  const trials = parseInt(a.sd_trials || "10", 10) || 10;
+  const timePer = parseFloat(a.sd_time_per || "") || 0;
+  const costPer = parseFloat(a.sd_cost_per || "") || 0;
+  return { per, between, cells, totalP, trials, totalTrials: totalP * trials, timePer, costPer, totalMin: totalP * timePer, totalCost: totalP * costPer };
+}
+
+// ---- Apparatus configurations (saved per condition/group) ----
+export interface ApparatusEntry {
+  id: string;
+  label: string;
+  group: string;                    // "All participants" or "<IV factor> = <level>"
+  mode: "ours" | "own";
+  params: Record<string, string>;   // when mode === "ours" (partial; defaults filled at render)
+  url: string;                      // when mode === "own"
+}
+
+let __apCounter = 0;
+export function normalizeApparatusEntry(x: any): ApparatusEntry {
+  const mode = x?.mode === "own" ? "own" : "ours";
+  const params = (x && typeof x.params === "object" && !Array.isArray(x.params))
+    ? Object.fromEntries(Object.entries(x.params).map(([k, v]) => [k, String(v)]))
+    : {};
+  return {
+    id: String(x?.id || `ap_${Date.now().toString(36)}_${__apCounter++}`),
+    label: String(x?.label || ""),
+    group: String(x?.group || "All participants"),
+    mode,
+    params,
+    url: String(x?.url || ""),
+  };
+}
+export function normalizeApparatusList(arr: any): ApparatusEntry[] {
+  return Array.isArray(arr) ? arr.map(normalizeApparatusEntry) : [];
+}
+export function parseApparatusList(a: Answers): ApparatusEntry[] {
+  try { return normalizeApparatusList(JSON.parse(a.apparatus_list || "[]")); } catch { return []; }
+}
+
+// ---- Participant groups (the actual between-subjects cells) ----
+export function slugId(s: string): string {
+  return (s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+export function ivLevelList(e: IvEntry): string[] {
+  const lv = (e.levels || "").trim();
+  if (!lv) return [];
+  if (lv.includes(" vs ")) return lv.split(" vs ").map((s) => s.trim()).filter(Boolean);   // binary
+  if (lv.includes("|")) return lv.split("|").map((s) => s.trim()).filter(Boolean);          // categorical "A | B"
+  return [lv]; // range / cognitive / single value
+}
+export function betweenIvs(a: Answers): IvEntry[] {
+  return parseIvs(a).filter((e) => e.alloc === "Between-subjects" && ivLevelList(e).length > 0);
+}
+export function withinIvs(a: Answers): IvEntry[] {
+  return parseIvs(a).filter((e) => e.alloc !== "Between-subjects" && ivLevelList(e).length > 0);
+}
+export interface ParticipantGroup { key: string; label: string; between: { factor: string; level: string }[]; }
+// Cartesian product of the between-subjects IV levels = one group per cell.
+export function participantGroups(a: Answers): ParticipantGroup[] {
+  const betw = betweenIvs(a);
+  if (!betw.length) return [{ key: "all", label: "All participants", between: [] }];
+  let combos: { factor: string; level: string }[][] = [[]];
+  for (const iv of betw) {
+    const name = iv.label || "IV";
+    const next: { factor: string; level: string }[][] = [];
+    for (const c of combos) for (const lvl of ivLevelList(iv)) next.push([...c, { factor: name, level: lvl }]);
+    combos = next;
+  }
+  return combos.map((between) => {
+    const label = between.map((b) => `${b.factor} = ${b.level}`).join(" · ");
+    return { key: label, label, between };
+  });
+}
+// Within-subjects IVs — every participant (in every group) goes through all their levels.
+export function withinCoverage(a: Answers): { factor: string; levels: string[] }[] {
+  return withinIvs(a).map((iv) => ({ factor: iv.label || "IV", levels: ivLevelList(iv) }));
+}
+// Options for assigning an apparatus to a group.
+export function ivGroupOptions(a: Answers): string[] {
+  const groups = participantGroups(a);
+  if (groups.length === 1 && groups[0].label === "All participants") return ["All participants"];
+  return ["All participants", ...groups.map((g) => g.label)];
+}
+
+export function apparatusSummaryLines(a: Answers): string[] {
+  return parseApparatusList(a).map((e) => {
+    const who = e.group || "All participants";
+    const what = e.mode === "own"
+      ? (e.url.trim() ? e.url.trim() : "(no URL)")
+      : `our interface (xaiType=${e.params.xaiType || "importance"}, dataset=${e.params.appId || "wine_quality"})`;
+    const label = e.label ? `${e.label}: ` : "";
+    return `${label}${who} → ${what}`;
+  });
 }

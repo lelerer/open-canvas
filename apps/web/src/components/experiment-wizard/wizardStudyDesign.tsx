@@ -1,0 +1,609 @@
+"use client";
+
+import React, { useState, useEffect } from "react";
+import { Upload, X, Plus } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { ACCENT, SERIF, COMMON_VAR_TYPES, rangeErrors, InfoTip, DocLabel, DocSelect, TextInput } from "./wizardUi";
+import {
+  Answers, IvEntry, IvFactor, IV_CATALOG, IV_GROUP_ORDER, ivFactorsForAgent, ivLevelsFor,
+  ALLOC_OPTIONS, BALANCING_METHODS, parseIvs, totalCells, betweenCells, validateParticipants,
+  participantGroups, withinCoverage,
+  DATASET_OPTIONS, DV_CATALOG, DV_GROUP_ORDER, DvEntry, parseDvs, Variable, parseVars,
+} from "./questions";
+
+export function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
+  const a = answers;
+  const ivs = parseIvs(a);
+  const cells = totalCells(ivs);
+  const check = validateParticipants(a);
+  const checkColor =
+    check?.level === "ok" ? "text-emerald-700"
+      : check?.level === "warn" ? "text-amber-700"
+        : "text-sky-700";
+
+  return (
+    <div style={{ fontFamily: SERIF }}>
+      <h1 className="text-2xl font-semibold leading-snug tracking-tight" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+        Study design{" "}
+        <InfoTip>
+          This is the heart of the experiment: what you <span className="font-medium text-neutral-800">measure</span>, what you <span className="font-medium text-neutral-800">change on purpose</span>, and what you <span className="font-medium text-neutral-800">keep the same</span> so any difference in results can be attributed to your manipulation. Each section below has its own ⓘ for what it means.
+        </InfoTip>
+      </h1>
+      <p className="mt-1 text-sm text-neutral-400" style={{ fontFamily: "ui-sans-serif, system-ui" }}>Define what you measure, change, and hold constant. Type directly, or let the assistant fill it in.</p>
+
+      <div className="mt-8 space-y-7">
+        <div>
+          <DocLabel tip={<span>The outcome you <span className="font-medium text-neutral-800">measure</span> — e.g. accuracy, decision time, trust. This is what your research question is really about. Pick from the list or define a custom one with a formula.</span>}>Dependent Variables (DV)</DocLabel>
+          <DvBuilder answers={answers} setAnswer={setAnswer} />
+        </div>
+
+        <div>
+          <DocLabel tip={<span>What you <span className="font-medium text-neutral-800">deliberately vary</span> across conditions (e.g. explanation vs none). Each IV and its levels create the conditions participants are split across.</span>}>Independent Variable(s)</DocLabel>
+          <IvBuilder answers={answers} setAnswer={setAnswer} />
+        </div>
+
+        <div>
+          <DocLabel tip={<span>Things you <span className="font-medium text-neutral-800">hold constant</span> across every condition so they can't be an alternative explanation for your results (e.g. same dataset, same device).</span>}>Control Variables (CV)</DocLabel>
+          <VariableList valueKey="sd_cv" answers={answers} setAnswer={setAnswer} namePlaceholder="e.g. dataset" />
+        </div>
+
+        <div>
+          <DocLabel tip={<span>Things that <span className="font-medium text-neutral-800">vary between people or trials but aren't controlled</span> — e.g. the participant, or the order trials happen to appear in.</span>}>Random Variables (RV)</DocLabel>
+          <VariableList valueKey="sd_rv" answers={answers} setAnswer={setAnswer} namePlaceholder="e.g. participant, stimulus order" />
+        </div>
+
+        <div className="border-t border-neutral-100 pt-6">
+          <DocLabel>Dataset</DocLabel>
+          <DatasetPicker answers={answers} setAnswer={setAnswer} />
+        </div>
+
+        <div className="border-t border-neutral-100 pt-6">
+          <DocLabel>Participants</DocLabel>
+          {(() => {
+            const numCls = "w-16 border-0 border-b border-neutral-200 bg-transparent px-0 py-0.5 text-center text-[15px] text-neutral-900 outline-none placeholder:text-neutral-400 focus:border-neutral-500";
+            const per = parseInt(a.sd_participants || "", 10) || 0;
+            const between = betweenCells(ivs);
+            const totalP = per * (between || 1);
+            const trials = parseInt(a.sd_trials || "10", 10) || 10;
+            const timePer = parseFloat(a.sd_time_per || "") || 0;
+            const costPer = parseFloat(a.sd_cost_per || "") || 0;
+            const totalMin = totalP * timePer;
+            const totalCost = totalP * costPer;
+            const totalTrials = totalP * trials;
+            const hrs = totalMin / 60;
+            return (
+              <>
+                <p className="mt-1 text-[15px] leading-8 text-neutral-800">
+                  We will recruit{" "}
+                  <input type="number" value={a.sd_participants ?? ""} onChange={(e) => setAnswer("sd_participants", e.target.value)} placeholder="N" className={numCls} />{" "}
+                  participants for each condition.
+                </p>
+                <p className="text-[15px] leading-8 text-neutral-800">
+                  Each participant completes{" "}
+                  <input type="number" value={a.sd_trials ?? "10"} onChange={(e) => setAnswer("sd_trials", e.target.value)} placeholder="10" className={numCls} />{" "}
+                  trials.
+                </p>
+                <p className="text-[15px] leading-8 text-neutral-800">
+                  Each participant takes{" "}
+                  <input type="number" value={a.sd_time_per ?? ""} onChange={(e) => setAnswer("sd_time_per", e.target.value)} placeholder="min" className={numCls} />{" "}
+                  minutes and costs{" "}
+                  <input type="number" value={a.sd_cost_per ?? ""} onChange={(e) => setAnswer("sd_cost_per", e.target.value)} placeholder="0" className={numCls} />{" "}
+                  per session.
+                </p>
+                <div className="mt-2 rounded-lg bg-neutral-50 px-3 py-2 text-sm text-neutral-600" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+                  <div><span className="text-neutral-400">Total participants:</span> <span className="font-medium text-neutral-800">{totalP}</span> ({per} × {between || 1} between-subjects group{between === 1 ? "" : "s"}, {cells} cell{cells === 1 ? "" : "s"})</div>
+                  <div><span className="text-neutral-400">Total trials:</span> <span className="font-medium text-neutral-800">{totalTrials}</span> ({totalP} × {trials})</div>
+                  {totalMin > 0 ? <div><span className="text-neutral-400">Estimated total time:</span> <span className="font-medium text-neutral-800">{totalMin} min</span> (~{hrs.toFixed(1)} h)</div> : null}
+                  {totalCost > 0 ? <div><span className="text-neutral-400">Estimated total cost:</span> <span className="font-medium text-neutral-800">{totalCost.toLocaleString()}</span></div> : null}
+                </div>
+                {check ? <p className={cn("mt-2 text-sm", checkColor)} style={{ fontFamily: "ui-sans-serif, system-ui" }}>{check.message}</p> : null}
+
+                {(() => {
+                  const groups = participantGroups(a);
+                  const within = withinCoverage(a);
+                  return (
+                    <div className="mt-3" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Participant groups — what each goes through</p>
+                      <div className="mt-1.5 space-y-1.5">
+                        {groups.map((g, i) => (
+                          <div key={g.key} className="rounded-lg border border-neutral-200 px-3 py-2 text-sm">
+                            <div className="flex items-baseline justify-between gap-2">
+                              <span className="font-medium text-neutral-800">{groups.length > 1 ? `Group ${i + 1}: ` : ""}{g.label}</span>
+                              <span className="shrink-0 text-xs text-neutral-400">{per || 0} participants</span>
+                            </div>
+                            <div className="mt-0.5 text-xs text-neutral-500">
+                              {g.between.length ? <span>Fixed condition: {g.between.map((b) => `${b.factor} = ${b.level}`).join(", ")}. </span> : null}
+                              {within.length
+                                ? <span>Each participant completes all levels of {within.map((w) => `${w.factor} (${w.levels.join(" / ")})`).join(", ")}{within.length ? " — order counterbalanced" : ""}.</span>
+                                : (!g.between.length ? <span>Every participant does the single condition.</span> : <span>No within-subjects factors.</span>)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="mt-1.5 text-xs text-neutral-400">These groups drive the Apparatus page — assign an interface to each with “Used by”.</p>
+                    </div>
+                  );
+                })()}
+              </>
+            );
+          })()}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function DvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
+  const items = parseDvs(answers.sd_dv);
+
+  function save(next: DvEntry[]) { setAnswer("sd_dv", JSON.stringify(next)); }
+  function add() { save([...items, { measure: "", name: "", formula: "" }]); }
+  function remove(i: number) { save(items.filter((_, idx) => idx !== i)); }
+  function patch(i: number, p: Partial<DvEntry>) { save(items.map((e, idx) => (idx === i ? { ...e, ...p } : e))); }
+  function setMeasure(i: number, id: string) {
+    if (id === "custom") patch(i, { measure: "custom", name: items[i]?.name || "" });
+    else patch(i, { measure: id, name: "" });
+  }
+
+  const grouped = DV_GROUP_ORDER.filter((g) => g !== "Custom").map((g) => ({ group: g, items: DV_CATALOG.filter((d) => d.group === g) })).filter((x) => x.items.length);
+
+  return (
+    <div style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+      {items.length === 0 ? <p className="text-sm text-neutral-400">No dependent variables yet — add one below.</p> : null}
+
+      <div className="space-y-3">
+        {items.map((e, i) => {
+          const def = e.measure && e.measure !== "custom" ? DV_CATALOG.find((d) => d.id === e.measure)?.def : "";
+          return (
+            <div key={i} className="rounded-lg border border-neutral-200 bg-white p-3">
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-semibold text-neutral-400">DV {i + 1}</span>
+                <select
+                  value={e.measure}
+                  onChange={(ev) => setMeasure(i, ev.target.value)}
+                  className={cn("max-w-[18rem] flex-1 truncate border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none focus:border-neutral-500", e.measure ? "text-neutral-900" : "text-neutral-400")}
+                >
+                  {!e.measure ? <option value="">a measure</option> : null}
+                  {grouped.map((g) => (
+                    <optgroup key={g.group} label={g.group}>
+                      {g.items.map((d) => (<option key={d.id} value={d.id} title={d.def} className="text-neutral-900">{d.label}</option>))}
+                    </optgroup>
+                  ))}
+                  <optgroup label="Custom">
+                    <option value="custom" className="text-neutral-900">Custom DV (define formula)…</option>
+                  </optgroup>
+                </select>
+                <button type="button" onClick={() => remove(i)} className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600" aria-label="Remove DV">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {def ? <p className="mt-1 text-xs text-neutral-400">{def}</p> : null}
+
+              {e.measure === "custom" ? (
+                <div className="mt-2 space-y-2">
+                  <input
+                    value={e.name}
+                    onChange={(ev) => patch(i, { name: ev.target.value })}
+                    placeholder="DV name (e.g. Calibrated trust index)"
+                    className="w-full border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none placeholder:text-neutral-300 focus:border-neutral-500"
+                  />
+                  <textarea
+                    value={e.formula ?? ""}
+                    onChange={(ev) => patch(i, { formula: ev.target.value })}
+                    placeholder="Precise formula / how it's calculated — e.g. mean(|confidence − correctness|) per participant"
+                    rows={2}
+                    className="w-full resize-y rounded-md border border-neutral-200 bg-white px-3 py-2 font-mono text-[13px] outline-none placeholder:text-neutral-300 focus:border-neutral-400"
+                  />
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+
+        <button type="button" onClick={add} className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:bg-neutral-50">
+          <Plus className="h-4 w-4" /> Add dependent variable
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function VariableList({ valueKey, answers, setAnswer, namePlaceholder }: { valueKey: string; answers: Answers; setAnswer: (id: string, v: string) => void; namePlaceholder?: string }) {
+  const items = parseVars(answers[valueKey]);
+  const [types, setTypes] = useState<string[]>([]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("experiment-var-types");
+      if (raw) setTypes(JSON.parse(raw));
+    } catch { /* ignore */ }
+  }, []);
+  function rememberType(t: string) {
+    const tt = t.trim();
+    if (!tt || types.includes(tt)) return;
+    const next = [...types, tt];
+    setTypes(next);
+    try { localStorage.setItem("experiment-var-types", JSON.stringify(next)); } catch { /* ignore */ }
+  }
+
+  function save(next: Variable[]) {
+    setAnswer(valueKey, JSON.stringify(next));
+  }
+  function add() { save([...items, { name: "", type: "" }]); }
+  function remove(i: number) { save(items.filter((_, idx) => idx !== i)); }
+  function update(i: number, patch: Partial<Variable>) {
+    save(items.map((v, idx) => (idx === i ? { ...v, ...patch } : v)));
+  }
+
+  const listId = `vartypes-${valueKey}`;
+  const typeOptions = Array.from(new Set([...COMMON_VAR_TYPES, ...types]));
+  const inputCls = "border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none placeholder:text-neutral-300 focus:border-neutral-500";
+
+  return (
+    <div style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+      <datalist id={listId}>
+        {typeOptions.map((t) => (<option key={t} value={t} />))}
+      </datalist>
+
+      {items.length === 0 ? <p className="text-sm text-neutral-400">None yet — add one below.</p> : null}
+
+      <div className="space-y-2">
+        {items.map((v, i) => (
+          <div key={i} className="flex items-center gap-3">
+            <input
+              value={v.name}
+              onChange={(e) => update(i, { name: e.target.value })}
+              placeholder={namePlaceholder || "name"}
+              className={cn(inputCls, "flex-1")}
+            />
+            <input
+              value={v.type}
+              onChange={(e) => update(i, { type: e.target.value })}
+              onBlur={() => rememberType(v.type)}
+              list={listId}
+              placeholder="type (custom)"
+              className={cn(inputCls, "w-40")}
+            />
+            <button type="button" onClick={() => remove(i)} className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600" aria-label="Remove">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <button type="button" onClick={add} className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-dashed border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:bg-neutral-50">
+        <Plus className="h-4 w-4" /> Add variable
+      </button>
+    </div>
+  );
+}
+
+export function DatasetPicker({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
+  const a = answers;
+  // user-uploaded CSV names are remembered in ds_custom_datasets (comma-joined)
+  const custom = (a.ds_custom_datasets || "").split("|").map((s) => s.trim()).filter(Boolean);
+  const options = [...DATASET_OPTIONS, ...custom];
+
+  function onUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const name = file.name.replace(/\.csv$/i, "");
+    const nextCustom = Array.from(new Set([...custom, name]));
+    setAnswer("ds_custom_datasets", nextCustom.join(" | "));
+    setAnswer("ds_dataset", name);
+    e.target.value = "";
+  }
+
+  return (
+    <div style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+      <div className="flex flex-wrap items-center gap-3">
+        <select
+          value={a.ds_dataset ?? ""}
+          onChange={(e) => setAnswer("ds_dataset", e.target.value)}
+          className={cn("min-w-[12rem] rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-400", a.ds_dataset ? "text-neutral-900" : "text-neutral-400")}
+        >
+          <option value="">— Select a dataset —</option>
+          <optgroup label="Available">
+            {DATASET_OPTIONS.map((d) => (<option key={d} value={d} className="text-neutral-900">{d}</option>))}
+          </optgroup>
+          {custom.length ? (
+            <optgroup label="Your uploads">
+              {custom.map((d) => (<option key={d} value={d} className="text-neutral-900">{d}</option>))}
+            </optgroup>
+          ) : null}
+          {(a.ds_dataset || "").trim() && ![...DATASET_OPTIONS, ...custom].includes((a.ds_dataset || "").trim()) ? (
+            <optgroup label="Set by assistant">
+              <option value={(a.ds_dataset || "").trim()} className="text-neutral-900">{(a.ds_dataset || "").trim()}</option>
+            </optgroup>
+          ) : null}
+        </select>
+
+        <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-dashed border-neutral-300 px-3 py-2 text-sm font-medium text-neutral-600 hover:bg-neutral-50">
+          <Upload className="h-4 w-4" /> Upload CSV
+          <input type="file" accept=".csv,text/csv" onChange={onUpload} className="hidden" />
+        </label>
+      </div>
+      <p className="mt-1.5 text-xs text-neutral-400">Pick a built-in dataset or upload your own CSV (the file name is recorded; data stays in your browser).</p>
+    </div>
+  );
+}
+
+export function AllocToggle({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="inline-flex overflow-hidden rounded-md border border-neutral-200" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+      {ALLOC_OPTIONS.map((opt) => {
+        const on = value === opt;
+        return (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => onChange(opt)}
+            className={cn("px-2.5 py-1 text-xs font-medium transition-colors", on ? "text-white" : "bg-white text-neutral-500 hover:bg-neutral-50")}
+            style={on ? { backgroundColor: ACCENT } : undefined}
+          >
+            {opt === "Within-subjects" ? "Within" : "Between"}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export function IvLevelEditor({ factor, entry, agent, onPatch }: { factor: IvFactor; entry: IvEntry; agent: string; onPatch: (patch: Partial<IvEntry>) => void }) {
+  const levels = (entry.levels || "").split(" | ").map((s) => s.trim()).filter(Boolean);
+  const numCls = "w-20 border-0 border-b border-neutral-200 bg-transparent px-0 py-0.5 text-center text-[15px] outline-none placeholder:text-neutral-400 focus:border-neutral-500";
+
+  function toggleLevel(lvl: string) {
+    const set = new Set(levels);
+    if (set.has(lvl)) set.delete(lvl); else set.add(lvl);
+    onPatch({ levels: [...set].join(" | ") });
+  }
+  function setRange(min: string, max: string) {
+    onPatch({ min, max, levels: min || max ? `${min || "?"}\u2013${max || "?"}` : "" });
+  }
+
+  const cogParams = factor.kind === "cognitive" && factor.cognitiveByAgent ? factor.cognitiveByAgent[agent] ?? [] : [];
+  const cogParam = cogParams.find((p) => p.name === entry.cogParam) || null;
+
+  return (
+    <div className="mt-2" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+      {factor.note ? <p className="mb-2 text-xs text-neutral-400">{factor.note}</p> : null}
+
+      {factor.kind === "categorical" ? (
+        <div className="flex flex-wrap gap-2">
+          {ivLevelsFor(factor, agent).map((lvl) => {
+            const on = levels.includes(lvl);
+            return (
+              <button key={lvl} type="button" onClick={() => toggleLevel(lvl)} className={cn("rounded-full border px-3 py-1 text-xs font-medium transition-colors", on ? "border-transparent text-white" : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-100")} style={on ? { backgroundColor: ACCENT } : undefined}>
+                {lvl}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {factor.kind === "binary" && factor.binary ? (
+        <p className="text-sm text-neutral-600">Comparing <span className="font-medium text-neutral-800">{factor.binary[0]}</span> vs <span className="font-medium text-neutral-800">{factor.binary[1]}</span> (2 conditions).</p>
+      ) : null}
+
+      {factor.kind === "range" && factor.range ? (() => {
+        const errs = rangeErrors(entry.min ?? "", entry.max ?? "", factor.range.min, factor.range.max);
+        return (
+          <div className="text-sm text-neutral-600">
+            <p>
+              From <input type="number" value={entry.min ?? ""} onChange={(e) => setRange(e.target.value, entry.max ?? "")} placeholder={String(factor.range.min)} className={numCls} /> to{" "}
+              <input type="number" value={entry.max ?? ""} onChange={(e) => setRange(entry.min ?? "", e.target.value)} placeholder={String(factor.range.max)} className={numCls} />{" "}
+              <span className="text-neutral-400">(allowed {factor.range.min}–{factor.range.max})</span>
+            </p>
+            {errs.length ? <p className="mt-1 text-xs font-medium text-red-600">{errs.join(" ")}</p> : null}
+          </div>
+        );
+      })() : null}
+
+      {factor.kind === "cognitive" ? (
+        <div className="space-y-2">
+          <DocSelect
+            value={entry.cogParam ?? ""}
+            onChange={(v) => onPatch({ cogParam: v, label: v ? `Cognitive: ${v}` : "Cognitive Parameters", levels: "" })}
+            options={cogParams.map((p) => p.name)}
+            placeholder="choose a parameter"
+          />
+          {cogParam ? (
+            <div className="text-sm text-neutral-600">
+              {cogParam.note ? <p className="mb-1 text-xs text-neutral-400">{cogParam.note}</p> : null}
+              {cogParam.min < cogParam.max ? (() => {
+                const errs = rangeErrors(entry.min ?? "", entry.max ?? "", cogParam.min, cogParam.max);
+                return (
+                  <div>
+                    <p>
+                      From <input type="number" value={entry.min ?? ""} onChange={(e) => setRange(e.target.value, entry.max ?? "")} placeholder={String(cogParam.min)} className={numCls} /> to{" "}
+                      <input type="number" value={entry.max ?? ""} onChange={(e) => setRange(entry.min ?? "", e.target.value)} placeholder={String(cogParam.max)} className={numCls} />{" "}
+                      <span className="text-neutral-400">(allowed {cogParam.min} to {cogParam.max})</span>
+                    </p>
+                    {errs.length ? <p className="mt-1 text-xs font-medium text-red-600">{errs.join(" ")}</p> : null}
+                  </div>
+                );
+              })() : (
+                <input value={entry.levels ?? ""} onChange={(e) => onPatch({ levels: e.target.value })} placeholder="e.g. top-2 features vs all features" className="w-full border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none placeholder:text-neutral-400 focus:border-neutral-500" />
+              )}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export const IV_TYPES_KEY = "experiment-iv-types";
+// Replace with your real docs link for adding IV types.
+
+export const IV_TYPES_DOCS = "#";
+
+export function IvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
+  const a = answers;
+  const agent = a.sd_iv_agent || (a.user_model === "CoXAM" ? "CoXAM" : a.user_model === "Sim2Real" ? "Sim2Real" : "CoAX");
+  const ivs = parseIvs(a);
+
+  const [customs, setCustoms] = useState<IvFactor[]>([]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [draft, setDraft] = useState({ name: "", levels: "", def: "", pip: "", file: "" });
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(IV_TYPES_KEY);
+      if (raw) setCustoms(JSON.parse(raw));
+    } catch { /* ignore */ }
+  }, []);
+  function persistCustoms(next: IvFactor[]) {
+    setCustoms(next);
+    try { localStorage.setItem(IV_TYPES_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+  }
+
+  // built-ins available for this model + user-added custom types (available to all)
+  const factors = [...ivFactorsForAgent(agent), ...customs];
+  const findFactor = (id: string) => factors.find((f) => f.id === id) || null;
+
+  // One-time migration from the old single-IV fields.
+  useEffect(() => {
+    if (!a.sd_ivs && a.sd_iv_factor) {
+      const migrated: IvEntry[] = [{
+        factor: a.sd_iv_factor,
+        label: a.sd_iv || "",
+        levels: a.sd_iv_levels || "",
+        cogParam: a.sd_cog_param || "",
+        min: a.sd_iv_min || "",
+        max: a.sd_iv_max || "",
+        alloc: a.sd_design || "Within-subjects",
+      }];
+      setAnswer("sd_ivs", JSON.stringify(migrated));
+      setAnswer("sd_conditions", String(totalCells(migrated)));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function save(next: IvEntry[]) {
+    setAnswer("sd_ivs", JSON.stringify(next));
+    setAnswer("sd_conditions", String(totalCells(next)));
+  }
+  function addIv() { save([...ivs, { factor: "", label: "", levels: "", alloc: "Within-subjects" }]); }
+  function removeIv(i: number) { save(ivs.filter((_, idx) => idx !== i)); }
+  function patch(i: number, p: Partial<IvEntry>) { save(ivs.map((e, idx) => (idx === i ? { ...e, ...p } : e))); }
+  function setFactor(i: number, id: string) {
+    const f = findFactor(id);
+    const p: Partial<IvEntry> = { factor: id, label: f ? f.label : "", levels: "", cogParam: "", min: "", max: "" };
+    if (f?.kind === "binary" && f.binary) p.levels = `${f.binary[0]} vs ${f.binary[1]}`;
+    patch(i, p);
+  }
+
+  function addCustomType() {
+    const name = draft.name.trim();
+    if (!name) return;
+    const levels = draft.levels.split(",").map((s) => s.trim()).filter(Boolean);
+    const meta = [draft.def.trim(), draft.pip.trim() ? `pip: ${draft.pip.trim()}` : "", draft.file.trim() ? `spec: ${draft.file.trim()}` : ""].filter(Boolean).join(" · ");
+    const entry: IvFactor = {
+      id: `custom:${name}`,
+      label: name,
+      kind: "categorical",
+      group: "Custom",
+      def: meta || "Custom IV type.",
+      levels: levels.length ? levels : ["Level 1", "Level 2"],
+    };
+    persistCustoms([...customs.filter((c) => c.id !== entry.id), entry]);
+    setDraft({ name: "", levels: "", def: "", pip: "", file: "" });
+    setShowAdd(false);
+  }
+  function onSpecFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) setDraft((d) => ({ ...d, file: file.name }));
+    e.target.value = "";
+  }
+
+  // group factors for the dropdown
+  const grouped = IV_GROUP_ORDER.map((g) => ({ group: g, items: factors.filter((f) => (f.group || "Custom") === g) })).filter((x) => x.items.length);
+
+  return (
+    <div style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+      <div className="space-y-3">
+        {ivs.length === 0 ? (
+          <p className="text-sm text-neutral-400">No independent variables yet — add one below.</p>
+        ) : null}
+
+        {ivs.map((entry, i) => {
+          const factor = findFactor(entry.factor);
+          return (
+            <div key={i} className="rounded-lg border border-neutral-200 bg-white p-3">
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-semibold text-neutral-400">IV {i + 1}</span>
+                <select
+                  value={entry.factor}
+                  onChange={(e) => setFactor(i, e.target.value)}
+                  className={cn("max-w-[18rem] flex-1 truncate border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none focus:border-neutral-500", entry.factor ? "text-neutral-900" : "text-neutral-400")}
+                >
+                  {!entry.factor ? <option value="">a factor</option> : null}
+                  {grouped.map((g) => (
+                    <optgroup key={g.group} label={g.group}>
+                      {g.items.map((f) => (<option key={f.id} value={f.id} title={f.def} className="text-neutral-900">{f.label}</option>))}
+                    </optgroup>
+                  ))}
+                </select>
+                <AllocToggle value={entry.alloc} onChange={(v) => patch(i, { alloc: v })} />
+                <button type="button" onClick={() => removeIv(i)} className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600" aria-label="Remove IV">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              {factor?.def ? <p className="mt-1 text-xs text-neutral-400">{factor.def}</p> : null}
+              {factor ? <IvLevelEditor factor={factor} entry={entry} agent={agent} onPatch={(p) => patch(i, p)} /> : null}
+              {entry.alloc === "Within-subjects" ? (
+                <div className="mt-2 flex items-center gap-2 text-sm text-neutral-600">
+                  <span className="text-neutral-500">Counterbalancing:</span>
+                  <select
+                    value={entry.balancing ?? ""}
+                    onChange={(e) => patch(i, { balancing: e.target.value })}
+                    className={cn("rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs outline-none focus:border-neutral-400", entry.balancing ? "text-neutral-900" : "text-neutral-400")}
+                  >
+                    <option value="">— none —</option>
+                    {BALANCING_METHODS.map((b) => (<option key={b} value={b} className="text-neutral-900">{b}</option>))}
+                  </select>
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={addIv} className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:bg-neutral-50">
+            <Plus className="h-4 w-4" /> Add independent variable
+          </button>
+          <button type="button" onClick={() => setShowAdd((v) => !v)} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium" style={{ color: ACCENT }}>
+            <Upload className="h-4 w-4" /> Add IV type
+          </button>
+        </div>
+
+        {showAdd ? (
+          <div className="rounded-lg border border-neutral-200 bg-neutral-50/60 p-3">
+            <p className="text-sm font-medium text-neutral-800">Add a new IV type</p>
+            <p className="mt-0.5 text-xs text-neutral-400">
+              Define a custom factor, or attach a spec / Python / pip package.{" "}
+              <a href={IV_TYPES_DOCS} target="_blank" rel="noreferrer" className="underline" style={{ color: ACCENT }}>How it works ↗</a>
+            </p>
+            <div className="mt-3 space-y-2">
+              <TextInput value={draft.name} onChange={(v) => setDraft({ ...draft, name: v })} placeholder="Type name (e.g. Explanation Length)" />
+              <TextInput value={draft.levels} onChange={(v) => setDraft({ ...draft, levels: v })} placeholder="Levels, comma-separated (e.g. Short, Long)" />
+              <TextInput value={draft.def} onChange={(v) => setDraft({ ...draft, def: v })} placeholder="One-line definition (optional)" />
+              <TextInput value={draft.pip} onChange={(v) => setDraft({ ...draft, pip: v })} placeholder="pip install … (optional)" />
+              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-dashed border-neutral-300 px-3 py-1.5 text-sm text-neutral-600 hover:bg-neutral-100">
+                <Upload className="h-4 w-4" /> {draft.file ? draft.file : "Upload spec / .py (optional)"}
+                <input type="file" accept=".py,.json,.yaml,.yml,.txt" onChange={onSpecFile} className="hidden" />
+              </label>
+            </div>
+            <div className="mt-3 flex gap-2">
+              <button onClick={addCustomType} className="rounded-md px-3 py-1.5 text-sm font-medium text-white" style={{ backgroundColor: ACCENT }}>Add type</button>
+              <button onClick={() => setShowAdd(false)} className="rounded-md border border-neutral-200 px-3 py-1.5 text-sm text-neutral-600 hover:bg-neutral-50">Cancel</button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
