@@ -34,10 +34,7 @@ export function buildExportText(a: Answers): string {
     `Total participants: ${a.sd_participants ? p.totalP : "(n/a)"}`,
     `Trials per participant: ${p.trials}`,
     `Total trials: ${a.sd_participants ? p.totalTrials : "(n/a)"}`,
-    `Time per participant (min): ${a.sd_time_per || "(not provided)"}`,
-    `Cost per participant: ${a.sd_cost_per || "(not provided)"}`,
-    `Estimated total time (min): ${p.totalMin || "(n/a)"}`,
-    `Estimated total cost: ${p.totalCost || "(n/a)"}`, "",
+
     "APPARATUS",
     ...(apparatusSummaryLines(a).length ? apparatusSummaryLines(a) : ["(none)"]), "",
     "PROCEDURE",
@@ -74,10 +71,6 @@ export function buildExportJson(a: Answers): string {
       totalParticipants: a.sd_participants ? p.totalP : null,
       trialsPerParticipant: p.trials,
       totalTrials: a.sd_participants ? p.totalTrials : null,
-      timePerParticipantMin: a.sd_time_per ? p.timePer : null,
-      costPerParticipant: a.sd_cost_per ? p.costPer : null,
-      estimatedTotalTimeMin: p.totalMin || null,
-      estimatedTotalCost: p.totalCost || null,
     },
     apparatus: parseApparatusList(a),
     procedure: parseProcSteps(a.proc_steps),
@@ -124,8 +117,6 @@ export function buildExportDoc(a: Answers): string {
     ${row("Total participants", a.sd_participants ? String(p.totalP) : "n/a")}
     ${row("Trials per participant", String(p.trials))}
     ${row("Total trials", a.sd_participants ? String(p.totalTrials) : "n/a")}
-    ${row("Estimated total time", p.totalMin ? `${p.totalMin} min (~${(p.totalMin / 60).toFixed(1)} h)` : "n/a")}
-    ${row("Estimated total cost", p.totalCost ? String(p.totalCost) : "n/a")}
     <h2>Apparatus</h2>
     ${apparatusSummaryLines(a).length ? apparatusSummaryLines(a).map((l) => `<p>${esc(l)}</p>`).join("") : "<p><i>(not provided)</i></p>"}
     <h2>Procedure</h2>
@@ -232,8 +223,6 @@ export function ReviewPage({ answers, onJump }: { answers: Answers; onJump: (id:
           <RRow label="Total participants" value={a.sd_participants ? String(participantTotals(a).totalP) : ""} />
           <RRow label="Trials / participant" value={String(participantTotals(a).trials)} />
           <RRow label="Total trials" value={a.sd_participants ? String(participantTotals(a).totalTrials) : ""} />
-          {participantTotals(a).totalMin ? <RRow label="Est. total time" value={`${participantTotals(a).totalMin} min (~${(participantTotals(a).totalMin / 60).toFixed(1)} h)`} /> : null}
-          {participantTotals(a).totalCost ? <RRow label="Est. total cost" value={String(participantTotals(a).totalCost)} /> : null}
           {check ? <div className={cn("mt-3 rounded-lg border px-3 py-2 text-sm", checkColor)} style={{ fontFamily: "ui-sans-serif, system-ui" }}>{check.message}</div> : null}
         </RSection>
         <RSection title="Apparatus" done={isPageComplete(PAGES[2], a)} onJump={() => onJump("apparatus")}>

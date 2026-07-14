@@ -377,13 +377,8 @@ export function ivEntryFromSpec(spec: any, agent: string): IvEntry | null {
   }
 
   if (f.kind === "range") {
-    const arr = Array.isArray(spec.levels) ? spec.levels : [];
-    const min = spec.min ?? arr[0];
-    const max = spec.max ?? arr[1];
-    const minS = min != null && min !== "" ? String(min) : "";
-    const maxS = max != null && max !== "" ? String(max) : "";
-    const levels = minS || maxS ? `${minS || "?"}\u2013${maxS || "?"}` : "";
-    return { factor: f.id, label: f.label, levels, min: minS, max: maxS, alloc, balancing };
+    const lvls = Array.isArray(spec.levels) ? spec.levels.map((x: any) => String(x).trim()).filter(Boolean) : [];
+    return { factor: f.id, label: f.label, levels: lvls.join(" | "), alloc, balancing };
   }
 
   if (f.kind === "cognitive") {
@@ -391,12 +386,8 @@ export function ivEntryFromSpec(spec: any, agent: string): IvEntry | null {
     const wanted = String(spec.cogParam || spec.param || "").trim().toLowerCase();
     const cp = params.find((p) => p.name.toLowerCase() === wanted) || params.find((p) => p.name.toLowerCase().includes(wanted) && wanted) || null;
     const cogParam = cp ? cp.name : "";
-    const min = spec.min ?? "";
-    const max = spec.max ?? "";
-    const minS = min !== "" && min != null ? String(min) : "";
-    const maxS = max !== "" && max != null ? String(max) : "";
-    const levels = minS || maxS ? `${minS || "?"}\u2013${maxS || "?"}` : "";
-    return { factor: f.id, label: cogParam ? `Cognitive: ${cogParam}` : f.label, levels, cogParam, min: minS, max: maxS, alloc, balancing };
+    const lvls = Array.isArray(spec.levels) ? spec.levels.map((x: any) => String(x).trim()).filter(Boolean) : [];
+    return { factor: f.id, label: cogParam ? `Cognitive: ${cogParam}` : f.label, levels: lvls.join(" | "), cogParam, alloc, balancing };
   }
 
   // categorical: keep only valid levels (normalising case), else fall back to provided.
@@ -675,9 +666,7 @@ export function participantTotals(a: Answers) {
   const cells = totalCells(ivs);
   const totalP = per * between;
   const trials = parseInt(a.sd_trials || "10", 10) || 10;
-  const timePer = parseFloat(a.sd_time_per || "") || 0;
-  const costPer = parseFloat(a.sd_cost_per || "") || 0;
-  return { per, between, cells, totalP, trials, totalTrials: totalP * trials, timePer, costPer, totalMin: totalP * timePer, totalCost: totalP * costPer };
+  return { per, between, cells, totalP, trials, totalTrials: totalP * trials };
 }
 
 // ---- Apparatus configurations (saved per condition/group) ----

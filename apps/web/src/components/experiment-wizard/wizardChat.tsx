@@ -19,7 +19,7 @@ export const GLOBAL_OPENING =
 export const ALL_FILLABLE = [
   "rq",
   "sd_dv", "sd_ivs", "sd_iv_agent", "sd_cv", "sd_rv",
-  "ds_dataset", "sd_participants", "sd_trials", "sd_time_per", "sd_cost_per",
+  "ds_dataset", "sd_participants", "sd_trials",
   "apparatus_list",
   "proc_steps",
   "user_model",

@@ -70,9 +70,9 @@ Field ids you can fill or modify (anywhere in the form):
   Rules:
     • factor must be one of the known IV types: "XAI Type", "XAI Method", "Faithfulness (XAI Fidelity)", "Robustness", "Sparsity", "Tested with XAI", "Number of Attributes", "Number of Training Instances", "Dataset", "AI Model", "Cognitive Parameters", "User Task". (An unrecognised factor becomes a custom categorical IV using the levels you give.)
     • Categorical factors (XAI Type, XAI Method, Dataset, AI Model, User Task): give "levels" from that factor's allowed values for the chosen model.
-    • Range factors (Faithfulness, Number of Attributes, Number of Training Instances): give numeric "min" and "max" instead of levels.
+    • Range factors (Faithfulness, Number of Attributes, Number of Training Instances): give "levels" as an array of the specific numeric values you want to test, e.g. "levels": [2, 8, 10] — each value becomes one level/condition (so [2,8,10] is a 3-level factor). Every value must fall within that factor's allowed range.
     • Binary factors (Robustness, Sparsity, Tested with XAI): you may omit "levels" (the two levels are implied).
-    • Cognitive Parameters: give "cogParam" (e.g. "Retrieval Threshold") plus "min"/"max".
+    • Cognitive Parameters: give "cogParam" (e.g. "Retrieval Threshold") plus "levels" as an array of the specific values to test (e.g. [-2, 0, 2]).
     • "balancing" is one of: "None", "Randomized order", "Full counterbalancing", "Latin square" — only meaningful for Within-subjects.
   Only set sd_ivs when the user has clearly described the manipulation; otherwise ask.
 - sd_dv — dependent variables. One item: { "measure": "<catalog label or 'custom'>", "name": "<only for custom>", "formula": "<precise calculation, for custom>" }. Catalog measures (use the label): "Task Accuracy", "Decision Time", "Appropriate Reliance", "Agreement Rate", "Trust", "Confidence", "Mental Workload (NASA-TLX)", "Satisfaction / Preference", "Forward-Simulation Accuracy", "Counterfactual-Simulation Accuracy", "Comprehension Score". For a user-defined DV use {"measure":"custom","name":"…","formula":"…"}. Edit with ops.
@@ -80,8 +80,6 @@ Field ids you can fill or modify (anywhere in the form):
 - sd_rv — random variables (same item shape as sd_cv). Edit with ops.
 - sd_participants (number string) — participants per condition
 - sd_trials (number string) — trials per participant (default 10)
-- sd_time_per (number string) — minutes per participant
-- sd_cost_per (number string) — cost per participant
 - ds_dataset (text) — dataset name (e.g. "Adult Income", "Wine Quality"), if the user states one
 - apparatus_list (ARRAY) — one or more interface configurations, each assigned to a group of participants. Prefer incremental ops (add/update/remove one entry, matched by label or group). Each entry: { "label": "…", "group": "All participants" or "<IV factor> = <level>" (e.g. "XAI Type = Importance"), "mode": "ours" | "own", "params": { appId, modelName, expMethod, instanceId, xaiType ("none"/"importance"/"attribution"/"weights"/"counterfactual"/"similar"), showPrediction/showTutorial/showGroundTruth/focusOnImportant/userSimulation ("0"/"1"), userPrediction ("none"/"0"/"1"), widgets ("instance,meters,xai,…") } for "ours", or "url" (full https:// link) for "own" }. Example op: {"target":"apparatus_list","op":"add","value":{"label":"Importance group","group":"XAI Type = Importance","mode":"ours","params":{"xaiType":"importance"}}}. Between-subjects designs typically have one entry per group (per IV level).
 - proc_steps — procedure steps. One item: { "title": "…", "note": "<optional details>", "link": "<optional URL>" }. (Attachments are uploaded by the user; you only set title / note / link.) Edit with ops.
