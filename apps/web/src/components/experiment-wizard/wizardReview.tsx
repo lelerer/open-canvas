@@ -11,6 +11,7 @@ import {
   validateParticipants, parseIdList, ivSummaryLines, participantTotals, mlProxyNames, cogConfigSummary,
   parseApparatusList, apparatusSummaryLines,
 } from "./questions";
+import { buildSurvey, buildSurveyJson, buildQsf } from "./survey";
 
 export function buildExportText(a: Answers): string {
   const v = (k: string) => (a[k] || "").trim() || "(not provided)";
@@ -187,13 +188,24 @@ export function ReviewPage({ answers, onJump }: { answers: Answers; onJump: (id:
           <h1 className="text-2xl font-semibold tracking-tight">Review & export</h1>
           <p className="mt-1 text-sm text-neutral-500">A read-only summary of your design. Download it as a Word document or JSON.</p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
           <span className="text-sm text-neutral-400">Export:</span>
           <Button variant="outline" size="sm" onClick={() => downloadFile("experiment-design.doc", buildExportDoc(a), "application/msword")}>
             <Download className="mr-1 h-4 w-4" /> Word (.doc)
           </Button>
           <Button variant="outline" size="sm" onClick={() => downloadFile("experiment-design.json", buildExportJson(a), "application/json")}>
-            <Download className="mr-1 h-4 w-4" /> JSON (.json)
+            <Download className="mr-1 h-4 w-4" /> Design JSON
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => downloadFile("survey.json", buildSurveyJson(a), "application/json")}>
+            <Download className="mr-1 h-4 w-4" /> Survey JSON
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => downloadFile("survey.qsf", buildQsf(a), "application/json")}
+            className="text-white"
+            style={{ backgroundColor: ACCENT }}
+          >
+            <Download className="mr-1 h-4 w-4" /> Qualtrics (.qsf)
           </Button>
         </div>
       </div>
@@ -244,6 +256,34 @@ export function ReviewPage({ answers, onJump }: { answers: Answers; onJump: (id:
           <RRow label="Comparison baselines" value={mlProxyNames(a)} />
           <RRow label="Cognitive config" value={cogConfigSummary(a)} />
         </RSection>
+
+        {(() => {
+          const s = buildSurvey(a);
+          const qs = s.blocks.flatMap((b) => b.questions);
+          const trials = qs.filter((q) => q.meta?.kind === "confidence").length;
+          const hasRandomizer = s.flow.some((f) => f.kind === "randomizer");
+          return (
+            <section className="border-t border-neutral-200 pt-6">
+              <div className="mb-2 flex items-center gap-2">
+                <h2 className="text-lg font-semibold text-neutral-900">Generated survey (Qualtrics)</h2>
+              </div>
+              <p className="text-[15px] text-neutral-700" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+                {s.blocks.length} block{s.blocks.length === 1 ? "" : "s"} (incl. welcome &amp; consent) · {qs.length} question{qs.length === 1 ? "" : "s"} · {trials} trial{trials === 1 ? "" : "s"}
+                {hasRandomizer ? " · one apparatus shown at random" : ""}
+              </p>
+              {s.blocks.length ? (
+                <ol className="mt-2 space-y-0.5 text-[15px] text-neutral-800">
+                  {s.blocks.map((b, i) => (
+                    <li key={b.id} className="leading-7">{i + 1}. {b.name} <span className="text-neutral-400">— {b.questions.length} question{b.questions.length === 1 ? "" : "s"}</span></li>
+                  ))}
+                </ol>
+              ) : <REmpty />}
+              <p className="mt-3 text-xs text-neutral-400" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+                Starts with a welcome &amp; consent block, then the apparatus trials (built from the Apparatus page). Each trial embeds the study interface for one instance ID (looping through the IDs you set per apparatus) followed by a prediction and a confidence question. {hasRandomizer ? "With more than one apparatus, each participant is shown one at random. " : ""}Export <strong>Qualtrics (.qsf)</strong> above, then in Qualtrics choose <em>Create project → Survey → Import a QSF file</em>.
+              </p>
+            </section>
+          );
+        })()}
       </div>
     </div>
   );

@@ -364,7 +364,7 @@ function NumericLevelsInput({ value, min, max, onChange }: { value: string; min:
   );
 }
 
-export function IvLevelEditor({ factor, entry, agent, onPatch }: { factor: IvFactor; entry: IvEntry; agent: string; onPatch: (patch: Partial<IvEntry>) => void }) {
+export function IvLevelEditor({ factor, entry, agent, onPatch, answers }: { factor: IvFactor; entry: IvEntry; agent: string; onPatch: (patch: Partial<IvEntry>) => void; answers?: Answers }) {
   const levels = (entry.levels || "").split(" | ").map((s) => s.trim()).filter(Boolean);
 
   function toggleLevel(lvl: string) {
@@ -376,21 +376,36 @@ export function IvLevelEditor({ factor, entry, agent, onPatch }: { factor: IvFac
   const cogParams = factor.kind === "cognitive" && factor.cognitiveByAgent ? factor.cognitiveByAgent[agent] ?? [] : [];
   const cogParam = cogParams.find((p) => p.name === entry.cogParam) || null;
 
+  // Categorical options. For the Dataset factor, offer every dataset (plus the
+  // researcher's uploads) so multiple can be compared — not just the agent's few.
+  const isDataset = factor.id === "dataset";
+  const datasetUploads = isDataset ? (answers?.ds_custom_datasets || "").split("|").map((s) => s.trim()).filter(Boolean) : [];
+  const categoricalOptions = Array.from(new Set([
+    ...(isDataset ? [...DATASET_OPTIONS, ...datasetUploads] : ivLevelsFor(factor, agent)),
+    ...levels, // keep any already-selected value visible even if not in the base list
+  ]));
+
   return (
     <div className="mt-2" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
       {factor.note ? <p className="mb-2 text-xs text-neutral-400">{factor.note}</p> : null}
 
       {factor.kind === "categorical" ? (
-        <div className="flex flex-wrap gap-2">
-          {ivLevelsFor(factor, agent).map((lvl) => {
-            const on = levels.includes(lvl);
-            return (
-              <button key={lvl} type="button" onClick={() => toggleLevel(lvl)} className={cn("rounded-full border px-3 py-1 text-xs font-medium transition-colors", on ? "border-transparent text-white" : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-100")} style={on ? { backgroundColor: ACCENT } : undefined}>
-                {lvl}
-              </button>
-            );
-          })}
-        </div>
+        <>
+          <div className="flex flex-wrap gap-2">
+            {categoricalOptions.map((lvl) => {
+              const on = levels.includes(lvl);
+              return (
+                <button key={lvl} type="button" onClick={() => toggleLevel(lvl)} className={cn("rounded-full border px-3 py-1 text-xs font-medium transition-colors", on ? "border-transparent text-white" : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-100")} style={on ? { backgroundColor: ACCENT } : undefined}>
+                  {lvl}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-1.5 text-xs text-neutral-400">
+            Tap to select — choose <span className="font-medium text-neutral-500">two or more</span> to compare them as conditions.
+            {levels.length ? ` ${levels.length} selected.` : ""}
+          </p>
+        </>
       ) : null}
 
       {factor.kind === "binary" && factor.binary ? (
@@ -543,7 +558,7 @@ export function IvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer:
                 </button>
               </div>
               {factor?.def ? <p className="mt-1 text-xs text-neutral-400">{factor.def}</p> : null}
-              {factor ? <IvLevelEditor factor={factor} entry={entry} agent={agent} onPatch={(p) => patch(i, p)} /> : null}
+              {factor ? <IvLevelEditor factor={factor} entry={entry} agent={agent} onPatch={(p) => patch(i, p)} answers={a} /> : null}
               {entry.alloc === "Within-subjects" ? (
                 <div className="mt-2 flex items-center gap-2 text-sm text-neutral-600">
                   <span className="text-neutral-500">Counterbalancing:</span>

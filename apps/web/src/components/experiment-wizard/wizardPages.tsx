@@ -10,8 +10,12 @@ import {
   Page, Answers, parseIvs, parseProcSteps, ProcStep, PROC_STEP_TYPES,
   USER_MODELS, UserModel, parseIdList, cognitiveParamsFor, CognitiveParam,
   parseApparatusList, ApparatusEntry, normalizeApparatusEntry, ivGroupOptions,
-  slugId, DATASET_OPTIONS,
+  slugId, DATASET_OPTIONS, parseInstanceIds, instanceIdsOf,
+  STUDY_UI_BASE, STUDY_PARAM_DEFAULTS, buildStudyUrl,
 } from "./questions";
+
+// Re-exported for backward compatibility with existing imports of these from this module.
+export { STUDY_UI_BASE, STUDY_PARAM_DEFAULTS, buildStudyUrl } from "./questions";
 
 export function TextBody({ page, answers, setAnswer }: { page: Page; answers: Answers; setAnswer: (id: string, v: string) => void }) {
   return (
@@ -43,8 +47,6 @@ export function TextBody({ page, answers, setAnswer }: { page: Page; answers: An
 // parameters the app reads; we assemble the link and preview it. The app's own logic
 // (in iframe.html / iframe.js) is untouched.
 
-export const STUDY_UI_BASE = "https://ubicomp-gpu-2023.ddns.comp.nus.edu.sg/api/UI/iframe.html";
-
 export const XAI_TYPES = ["none", "importance", "attribution", "weights", "counterfactual", "similar"];
 
 export const STUDY_WIDGETS = ["instance", "meters", "xai", "prediction", "feedback", "ground-truth"];
@@ -53,35 +55,13 @@ export const STUDY_FLAGS: { key: string; label: string }[] = [
   { key: "showPrediction", label: "showPrediction" },
   { key: "showTutorial", label: "showTutorial" },
   { key: "showGroundTruth", label: "showGroundTruth" },
-  { key: "focusOnImportant", label: "focusOnImportant" },
   { key: "userSimulation", label: "userSimulation" },
 ];
-
-export const STUDY_PARAM_DEFAULTS: Record<string, string> = {
-  appId: "wine_quality", modelName: "mlp", expMethod: "lime", instanceId: "0",
-  xaiType: "importance", showPrediction: "0", showTutorial: "0", showGroundTruth: "0",
-  focusOnImportant: "0", userSimulation: "0", userPrediction: "none", widgets: "",
-};
 
 export function getStudyParams(a: Answers): Record<string, string> {
   let o: Record<string, string> = {};
   try { o = JSON.parse(a.study_params || "{}"); } catch { o = {}; }
   return { ...STUDY_PARAM_DEFAULTS, ...o };
-}
-
-export function buildStudyUrl(base: string, p: Record<string, string>): string {
-  const q = new URLSearchParams();
-  q.set("appId", p.appId ?? "");
-  q.set("modelName", p.modelName ?? "");
-  q.set("expMethod", p.expMethod ?? "");
-  q.set("instanceId", p.instanceId ?? "0");
-  q.set("xaiType", p.xaiType ?? "none");
-  q.set("showPrediction", p.showPrediction ?? "0");
-  // optional flags only when turned on
-  for (const f of ["showTutorial", "showGroundTruth", "focusOnImportant", "userSimulation"]) if (p[f] === "1") q.set(f, "1");
-  if ((p.userPrediction ?? "none") !== "none") q.set("userPrediction", p.userPrediction);
-  if ((p.widgets ?? "").trim()) q.set("widgets", p.widgets);
-  return `${base}?${q.toString()}`;
 }
 
 export function ParamField({ label, children }: { label: string; children: ReactNode }) {
@@ -155,7 +135,11 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
   function removeEntry(id: string) { saveList(entries.filter((e) => e.id !== id)); if (editingId === id) setEditingId(null); }
 
   function entryParams(e: ApparatusEntry): Record<string, string> { return { ...STUDY_PARAM_DEFAULTS, ...e.params }; }
-  function builtFor(e: ApparatusEntry): string { return buildStudyUrl(STUDY_UI_BASE, entryParams(e)); }
+  function builtFor(e: ApparatusEntry): string {
+    const p = entryParams(e);
+    const first = instanceIdsOf(p)[0] ?? p.instanceId;
+    return buildStudyUrl(STUDY_UI_BASE, { ...p, instanceId: first });
+  }
   function previewFor(e: ApparatusEntry): string {
     if (e.mode === "own") return /^https?:\/\//i.test(e.url.trim()) ? e.url.trim() : "";
     return builtFor(e);
@@ -209,7 +193,7 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                   {e.mode === "ours" ? (
                     <div className="space-y-3">
                       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                        <ParamField label="appId (dataset)">
+                        <ParamField label="dataset">
                           <select value={entryParams(e).appId} onChange={(ev) => setParam(e, "appId", ev.target.value)} className={pcls}>
                             {withCur(appIdOpts, entryParams(e).appId).map((o) => (<option key={o} value={o}>{o}</option>))}
                           </select>
@@ -224,7 +208,15 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                             {withCur(methodOpts, entryParams(e).expMethod).map((o) => (<option key={o} value={o}>{o}</option>))}
                           </select>
                         </ParamField>
-                        <ParamField label="instanceId"><input type="number" value={entryParams(e).instanceId} onChange={(ev) => setParam(e, "instanceId", ev.target.value)} className={pcls} /></ParamField>
+                        <ParamField label="instance IDs (trials)">
+                          <input
+                            type="text"
+                            value={entryParams(e).instanceIds ?? instanceIdsOf(entryParams(e)).join(", ")}
+                            onChange={(ev) => setParam(e, "instanceIds", ev.target.value)}
+                            placeholder="e.g. 0, 3, 7, 12 or 0-9"
+                            className={pcls}
+                          />
+                        </ParamField>
                         <ParamField label="xaiType">
                           <select value={entryParams(e).xaiType} onChange={(ev) => setParam(e, "xaiType", ev.target.value)} className={pcls}>
                             {withCur([...XAI_TYPES], entryParams(e).xaiType).map((t) => (<option key={t} value={t}>{t}</option>))}
@@ -236,6 +228,18 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                           </select>
                         </ParamField>
                       </div>
+                      {(() => {
+                        const ids = instanceIdsOf(entryParams(e));
+                        return (
+                          <p className="text-xs text-neutral-400">
+                            {ids.length ? (
+                              <>Generates <span className="font-medium text-neutral-600">{ids.length}</span> trial{ids.length === 1 ? "" : "s"} for this group — instances {ids.join(", ")}. Each participant sees one instance per trial.</>
+                            ) : (
+                              <span className="text-amber-600">Enter at least one instance ID (e.g. <code>0, 3, 7</code> or a range <code>0-9</code>) — this defines the trials in the generated survey.</span>
+                            )}
+                          </p>
+                        );
+                      })()}
                       <div>
                         <span className="text-[11px] uppercase tracking-wide text-neutral-400">Flags</span>
                         <div className="mt-1 flex flex-wrap gap-2">

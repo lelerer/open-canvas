@@ -170,20 +170,20 @@ export const PAGE_CHAT: Record<string, { focus: string; fields: string[] }> = {
     fields: ["rq"],
   },
   studydesign: {
-    focus: "the independent variable(s), the model/framework, the dataset, and number of participants. You CAN set the IVs here via sd_ivs (factor, levels, within/between, counterbalancing). The other variables (DV / CV / RV) and the user model are added by the user elsewhere — guide them on those.",
-    fields: ["sd_iv_agent", "sd_ivs", "ds_dataset", "sd_participants"],
+    focus: "the whole study design. You CAN set all of it: dependent variables via sd_dv (catalog measure id or a custom {measure:'custom', name, formula}), independent variables via sd_ivs (factor, levels, within/between, counterbalancing), control variables via sd_cv and random variables via sd_rv ({name, type}), the model/framework via sd_iv_agent, the dataset via ds_dataset, and participants via sd_participants and trials via sd_trials. Prefer incremental ops for the list fields (sd_dv, sd_ivs, sd_cv, sd_rv).",
+    fields: ["sd_dv", "sd_ivs", "sd_cv", "sd_rv", "sd_iv_agent", "ds_dataset", "sd_participants", "sd_trials"],
   },
   apparatus: {
-    focus: "the apparatus configurations. Each entry in apparatus_list is one interface setup assigned to a group of participants (by IV level, e.g. \"XAI Type = Importance\") or to \"All participants\". Use ops to add/update/remove entries. Each entry: { label, group, mode (\"ours\"|\"own\"), params {appId,modelName,expMethod,instanceId,xaiType,showPrediction,...} for ours, or url for own }. Ask which interface they want and which group each applies to.",
+    focus: "the apparatus configurations. Each entry in apparatus_list is one interface setup assigned to a group of participants (by IV level, e.g. \"XAI Type = Importance\") or to \"All participants\". Use ops to add/update/remove entries. Each entry: { label, group, mode (\"ours\"|\"own\"), params {appId (the dataset), modelName, expMethod, instanceIds (comma/range list of trial instance IDs, e.g. \"0, 3, 7\" or \"0-9\"), xaiType, showPrediction, ...} for ours, or url for own }. Ask which interface they want, which instance IDs to show, and which group each applies to.",
     fields: ["apparatus_list"],
   },
   procedure: {
-    focus: "the step-by-step procedure. The user builds the steps as a structured list in the panel (each step can collect a DV and carry an attachment like a consent form). Help them think through the steps and how they map to the DVs, but you cannot add the steps yourself.",
-    fields: [],
+    focus: "the step-by-step procedure. You CAN add, edit, reorder, and remove steps via proc_steps (each step is { title, note?, link?, attachment? }); prefer incremental ops. Help them think through the steps and how they map to the DVs.",
+    fields: ["proc_steps"],
   },
   usermodel: {
-    focus: "the user model — a cognitive model, plus optional comparison baselines; the user picks from the list (you can help them choose)",
-    fields: [],
+    focus: "the user model and baselines. You CAN set them: user_model (the cognitive model id, e.g. \"CoAX\" or \"CoXAM\"), ml_proxies (a JSON array of comparison-baseline ids), and cog_config (a JSON object of cognitive-parameter values). Help the user choose from the list.",
+    fields: ["user_model", "ml_proxies", "cog_config"],
   },
   review: {
     focus: "reviewing the overall design (there are no fields to fill on this page)",
@@ -239,6 +239,7 @@ export function ChatPanel({ messages, setMessages, allowedFields, context, onApp
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
   const contextRef = useRef(context);
   contextRef.current = context;
   const allowedRef = useRef(new Set(allowedFields));
@@ -247,6 +248,14 @@ export function ChatPanel({ messages, setMessages, allowedFields, context, onApp
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
+
+  // Auto-grow the input to fit its text (capped; scrolls beyond the cap).
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [input]);
 
   async function send() {
     const text = input.trim();
@@ -324,12 +333,13 @@ export function ChatPanel({ messages, setMessages, allowedFields, context, onApp
       <div className="border-t border-neutral-200 px-3 py-3">
         <div className="flex items-end gap-2">
           <textarea
+            ref={taRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
             rows={1}
             placeholder="Describe your study, or answer the assistant…"
-            className="max-h-40 flex-1 resize-none rounded-xl border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-neutral-400"
+            className="max-h-40 flex-1 resize-none overflow-y-auto rounded-xl border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-neutral-400"
           />
           <button onClick={send} disabled={loading || !input.trim()} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white disabled:opacity-40" style={{ backgroundColor: ACCENT }} aria-label="Send">
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}

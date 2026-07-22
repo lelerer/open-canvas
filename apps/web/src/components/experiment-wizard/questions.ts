@@ -679,6 +679,75 @@ export interface ApparatusEntry {
   url: string;                      // when mode === "own"
 }
 
+// Parse a list of instance IDs from free text. Accepts comma / space / semicolon
+// separated tokens; numeric ranges like "0-9", "0–9" or "0..9" expand inclusively.
+// Non-numeric tokens (some datasets use string ids) are kept verbatim. De-duplicated,
+// order-preserving, and capped so a huge range can't lock up the UI.
+const INSTANCE_ID_CAP = 500;
+export function parseInstanceIds(raw: string | undefined): string[] {
+  const s = (raw || "").trim();
+  if (!s) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (v: string) => {
+    if (out.length >= INSTANCE_ID_CAP || seen.has(v)) return;
+    seen.add(v);
+    out.push(v);
+  };
+  for (const tokRaw of s.split(/[\s,;]+/)) {
+    const tok = tokRaw.trim();
+    if (!tok) continue;
+    const m = tok.match(/^(-?\d+)\s*(?:-|–|\.\.)\s*(-?\d+)$/);
+    if (m) {
+      const a = parseInt(m[1], 10);
+      const b = parseInt(m[2], 10);
+      const step = a <= b ? 1 : -1;
+      for (let i = a; step > 0 ? i <= b : i >= b; i += step) {
+        push(String(i));
+        if (out.length >= INSTANCE_ID_CAP) break;
+      }
+    } else {
+      push(tok);
+    }
+  }
+  return out;
+}
+
+// The instance-id list for an apparatus config, tolerating the legacy single
+// `instanceId` param (migrated transparently when `instanceIds` is unset).
+export function instanceIdsOf(params: Record<string, string>): string[] {
+  const list = parseInstanceIds(params.instanceIds);
+  if (list.length) return list;
+  const legacy = parseInstanceIds(params.instanceId);
+  return legacy.length ? legacy : [];
+}
+
+// ---- Study-interface URL (the deployed iframe.html app) ----
+// Pure helpers, kept here (not in the client component) so survey/QSF generation
+// can build interface URLs without importing React modules.
+export const STUDY_UI_BASE = "https://ubicomp-gpu-2023.ddns.comp.nus.edu.sg/api/UI/iframe.html";
+
+export const STUDY_PARAM_DEFAULTS: Record<string, string> = {
+  appId: "wine_quality", modelName: "mlp", expMethod: "lime", instanceId: "0",
+  xaiType: "importance", showPrediction: "0", showTutorial: "0", showGroundTruth: "0",
+  userSimulation: "0", userPrediction: "none", widgets: "",
+};
+
+export function buildStudyUrl(base: string, p: Record<string, string>): string {
+  const q = new URLSearchParams();
+  q.set("appId", p.appId ?? "");
+  q.set("modelName", p.modelName ?? "");
+  q.set("expMethod", p.expMethod ?? "");
+  q.set("instanceId", p.instanceId ?? "0");
+  q.set("xaiType", p.xaiType ?? "none");
+  q.set("showPrediction", p.showPrediction ?? "0");
+  // optional flags only when turned on
+  for (const f of ["showTutorial", "showGroundTruth", "userSimulation"]) if (p[f] === "1") q.set(f, "1");
+  if ((p.userPrediction ?? "none") !== "none") q.set("userPrediction", p.userPrediction);
+  if ((p.widgets ?? "").trim()) q.set("widgets", p.widgets);
+  return `${base}?${q.toString()}`;
+}
+
 let __apCounter = 0;
 export function normalizeApparatusEntry(x: any): ApparatusEntry {
   const mode = x?.mode === "own" ? "own" : "ours";
