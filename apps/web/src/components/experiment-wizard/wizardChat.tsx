@@ -70,6 +70,7 @@ export interface OpTargetCfg {
   write: (a: Answers, list: any[]) => Answers;
   match: (item: any, q: string) => boolean;
   build: (spec: any, a: Answers) => any | null;
+  merge?: (existing: any, patch: any) => any; // custom update merge (default: shallow spread)
 }
 
 export const OP_CFG: Record<string, OpTargetCfg> = {
@@ -108,6 +109,13 @@ export const OP_CFG: Record<string, OpTargetCfg> = {
     write: (a, list) => ({ ...a, apparatus_list: JSON.stringify(list) }),
     match: (it, q) => (String(it.label || "") + " " + String(it.group || "")).toLowerCase().includes(q),
     build: (v) => normalizeApparatusEntry(v),
+    // Deep-merge params so an update like {params:{form:"DT"}} tweaks one setting
+    // instead of wiping the entry's other params (instanceIds, elements, …).
+    merge: (it, patch) => ({
+      ...it,
+      ...patch,
+      params: { ...((it && it.params) || {}), ...((patch && patch.params) || {}) },
+    }),
   },
 };
 
@@ -131,7 +139,8 @@ export function applyOneOp(a: Answers, op: ApplyOp): Answers {
   } else if (op.op === "update") {
     const i = findIdx();
     if (i >= 0) {
-      const built = cfg.build({ ...list[i], ...(op.value || {}) }, a);
+      const merged = cfg.merge ? cfg.merge(list[i], op.value || {}) : { ...list[i], ...(op.value || {}) };
+      const built = cfg.build(merged, a);
       if (built) list = list.map((it, idx) => (idx === i ? built : it));
     }
   } else if (op.op === "replace" || op.op === "set") {
@@ -174,7 +183,7 @@ export const PAGE_CHAT: Record<string, { focus: string; fields: string[] }> = {
     fields: ["sd_dv", "sd_ivs", "sd_cv", "sd_rv", "sd_iv_agent", "ds_dataset", "sd_participants", "sd_trials"],
   },
   apparatus: {
-    focus: "the apparatus configurations. Each entry in apparatus_list is one interface setup assigned to a group of participants (by IV level, e.g. \"XAI Type = Importance\") or to \"All participants\". Use ops to add/update/remove entries. Each entry: { label, group, mode (\"ours\"|\"own\"), params {appId (the dataset), modelName, expMethod, instanceIds (comma/range list of trial instance IDs, e.g. \"0, 3, 7\" or \"0-9\"), xaiType, showPrediction, ...} for ours, or url for own }. Ask which interface they want, which instance IDs to show, and which group each applies to.",
+    focus: "the apparatus configurations. Each entry in apparatus_list is one interface setup assigned to a group of participants (by IV level, e.g. \"XAI Type = Importance\") or to \"All participants\". Use ops to add/update/remove entries. Each entry: { label, group, mode (\"ours\"|\"own\"), params for ours, or url for own }. params: { appId (adult|mushrooms|wine_quality|forest_cover), form (attribution|importance|LR|DT — LR and DT use the global surrogate interface, the others the local one; the AI model is derived automatically), expMethod (shap|lime, local forms only), LRVariant (dense|sparse, LR only), DTDepth (2|3, DT only), DTEditor (1|0, DT only), instanceIds (comma/range list of trial instance IDs, e.g. \"0, 3, 7\" or \"0-9\" — local ranges: mushrooms 0-3938, wine_quality 0-121, adult/forest_cover 0-299; global always 0-399), elements (comma list of interface elements: instance,meters,xai,prediction,feedback,ground-truth,tutorial,sliders — instance/meters/feedback/ground-truth are local-only), focusOnImportant (1|0, local), userPrediction (none|0|1, local), showExplanationPrediction (1|0, global), recourseConfirm (1|0, global with sliders) }. Ask which interface they want, which instance IDs to show, and which group each applies to.",
     fields: ["apparatus_list"],
   },
   procedure: {

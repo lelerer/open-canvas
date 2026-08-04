@@ -722,30 +722,132 @@ export function instanceIdsOf(params: Record<string, string>): string[] {
   return legacy.length ? legacy : [];
 }
 
-// ---- Study-interface URL (the deployed iframe.html app) ----
+// ---- Study-interface URL (the deployed XAI iframe apps) ----
 // Pure helpers, kept here (not in the client component) so survey/QSF generation
 // can build interface URLs without importing React modules.
-export const STUDY_UI_BASE = "https://ubicomp-gpu-2023.ddns.comp.nus.edu.sg/api/UI/iframe.html";
+//
+// Two renderer namespaces:
+//   /local  — CoAX renderer: per-instance attribution/importance (SHAP/LIME)
+//   /global — surrogate renderer: LR weights and DT rules
+// The namespace follows the explanation form: LR|DT → global, else → local.
+export const STUDY_UI_ROOT = "https://lucas1213wzy.github.io/xaikit-test-ui-apparatus";
+
+export interface StudyDataset { appId: string; label: string; localMax: number }
+export const STUDY_DATASETS: StudyDataset[] = [
+  { appId: "adult", label: "Adult Income", localMax: 299 },
+  { appId: "mushrooms", label: "Mushroom", localMax: 3938 },
+  { appId: "wine_quality", label: "Wine Quality", localMax: 121 },
+  { appId: "forest_cover", label: "Forest Cover", localMax: 299 },
+];
+
+export const EXPLANATION_FORMS: { id: string; label: string; ns: "local" | "global" }[] = [
+  { id: "attribution", label: "Feature attribution", ns: "local" },
+  { id: "importance", label: "Feature importance", ns: "local" },
+  { id: "LR", label: "Logistic regression weights", ns: "global" },
+  { id: "DT", label: "Decision tree rules", ns: "global" },
+];
+
+// Participant-screen elements. Keys map to /local widgets (sliders → simulation);
+// localOnly elements are ignored by / unavailable in the global renderer.
+// `required` elements are always on and cannot be deselected.
+export interface InterfaceElement { key: string; label: string; sub: string; localOnly?: boolean; required?: boolean }
+export const INTERFACE_ELEMENTS: InterfaceElement[] = [
+  { key: "instance", label: "Data instance", sub: "Feature names and values", localOnly: true, required: true },
+  { key: "meters", label: "Meter bars", sub: "Value ranges and category marks", localOnly: true },
+  { key: "xai", label: "XAI visualization", sub: "Attribution, importance, or surrogate" },
+  { key: "prediction", label: "AI prediction", sub: "Predicted class or outcome" },
+  { key: "feedback", label: "AI feedback", sub: "Compare user and AI selections", localOnly: true },
+  { key: "ground-truth", label: "Ground truth", sub: "Reveal the correct class", localOnly: true },
+  { key: "tutorial", label: "Tutorial markers", sub: "Numbered visual guidance" },
+  { key: "sliders", label: "Feature sliders", sub: "Participant drags one feature and re-predicts" },
+];
+
+export function formOf(p: Record<string, string>): string {
+  if (p.form) return p.form;
+  // legacy migration from the old single xaiType param
+  const legacy = (p.xaiType || "").toLowerCase();
+  if (legacy === "weights") return "LR";
+  if (legacy === "importance") return "importance";
+  return "attribution";
+}
+
+export function namespaceOf(p: Record<string, string>): "local" | "global" {
+  const f = formOf(p);
+  return f === "LR" || f === "DT" ? "global" : "local";
+}
+
+export function elementsOf(p: Record<string, string>): string[] {
+  const raw = p.elements != null ? p.elements : p.widgets != null ? p.widgets : "instance,xai,prediction";
+  const els = raw.split(",").map((s) => s.trim()).filter(Boolean).map((k) => (k === "simulation" ? "sliders" : k));
+  // "Data instance" is always shown — it cannot be deselected (also repairs
+  // older saved configs and chat-set element lists that omitted it).
+  if (!els.includes("instance")) els.unshift("instance");
+  return els;
+}
+
+// modelName is fixed by dataset (and, in global LR, by the dataset too) — never user-chosen.
+export function modelNameFor(p: Record<string, string>): string {
+  const appId = p.appId || "wine_quality";
+  if (namespaceOf(p) === "global") return formOf(p) === "LR" && appId === "forest_cover" ? "xgboost" : "mlp";
+  return appId === "adult" || appId === "forest_cover" ? "xgboost" : "mlp";
+}
+
+// Valid instanceId range. NOTE: the two namespaces index different corpora, so
+// ids must be re-checked whenever the explanation form changes namespace.
+export function instanceRangeFor(p: Record<string, string>): { min: number; max: number } {
+  if (namespaceOf(p) === "global") return { min: 0, max: 399 };
+  const ds = STUDY_DATASETS.find((d) => d.appId === (p.appId || "wine_quality"));
+  return { min: 0, max: ds ? ds.localMax : 299 };
+}
 
 export const STUDY_PARAM_DEFAULTS: Record<string, string> = {
-  appId: "wine_quality", modelName: "mlp", expMethod: "lime", instanceId: "0",
-  xaiType: "importance", showPrediction: "0", showTutorial: "0", showGroundTruth: "0",
-  userSimulation: "0", userPrediction: "none", widgets: "",
+  appId: "wine_quality", expMethod: "shap", instanceId: "0",
+  LRVariant: "dense", DTDepth: "3", DTEditor: "0",
+  focusOnImportant: "0", userPrediction: "none",
+  showExplanationPrediction: "1", recourseConfirm: "0",
 };
 
-export function buildStudyUrl(base: string, p: Record<string, string>): string {
+export function buildStudyUrl(root: string, p: Record<string, string>): string {
+  const form = formOf(p);
+  const ns = namespaceOf(p);
+  const els = elementsOf(p);
+  const has = (k: string) => els.includes(k);
+  // "XAI visualization" unchecked → xaiType=none. No elements selected at all
+  // means "show everything" (the host's default when widgets is omitted).
+  const xaiOn = has("xai") || els.length === 0;
   const q = new URLSearchParams();
-  q.set("appId", p.appId ?? "");
-  q.set("modelName", p.modelName ?? "");
-  q.set("expMethod", p.expMethod ?? "");
+  q.set("appId", p.appId || "wine_quality");
   q.set("instanceId", p.instanceId ?? "0");
-  q.set("xaiType", p.xaiType ?? "none");
-  q.set("showPrediction", p.showPrediction ?? "0");
-  // optional flags only when turned on
-  for (const f of ["showTutorial", "showGroundTruth", "userSimulation"]) if (p[f] === "1") q.set(f, "1");
-  if ((p.userPrediction ?? "none") !== "none") q.set("userPrediction", p.userPrediction);
-  if ((p.widgets ?? "").trim()) q.set("widgets", p.widgets);
-  return `${base}?${q.toString()}`;
+  q.set("modelName", modelNameFor(p));
+  // Flags are always emitted as bare 1/0 — the two renderers parse them differently.
+  if (ns === "local") {
+    q.set("expMethod", p.expMethod === "lime" ? "lime" : "shap");
+    q.set("xaiType", xaiOn ? form : "none");
+    if (els.length) q.set("widgets", els.map((k) => (k === "sliders" ? "simulation" : k)).join(","));
+    q.set("showPrediction", has("prediction") ? "1" : "0");
+    q.set("showTutorial", has("tutorial") ? "1" : "0");
+    q.set("userSimulation", has("sliders") ? "1" : "0");
+    q.set("userPrediction", p.userPrediction || "none");
+    q.set("showGroundTruth", has("ground-truth") ? "1" : "0");
+    q.set("focusOnImportant", p.focusOnImportant === "1" ? "1" : "0");
+  } else {
+    q.set("xaiType", xaiOn ? form : "none");
+    // DTDepth and LRVariant never coexist — exactly one, matching the form.
+    if (xaiOn && form === "DT") {
+      q.set("DTDepth", p.DTDepth === "2" ? "2" : "3");
+      if (p.DTEditor === "1") q.set("DTEditor", "1");
+    } else if (xaiOn && form === "LR") {
+      q.set("LRVariant", p.LRVariant === "sparse" ? "sparse" : "dense");
+    }
+    q.set("showPrediction", has("prediction") ? "1" : "0");
+    if (has("tutorial")) q.set("showTutorial", "1");
+    if (p.showExplanationPrediction === "0") q.set("showExplanationPrediction", "0");
+    if (has("sliders")) {
+      q.set("counterfactualSimulation", "1");
+      if (p.recourseConfirm === "1") q.set("recourseConfirm", "1");
+    }
+  }
+  return `${root}/${ns}/iframe.html?${q.toString()}`;
 }
 
 let __apCounter = 0;
@@ -818,9 +920,15 @@ export function ivGroupOptions(a: Answers): string[] {
 export function apparatusSummaryLines(a: Answers): string[] {
   return parseApparatusList(a).map((e) => {
     const who = e.group || "All participants";
-    const what = e.mode === "own"
-      ? (e.url.trim() ? e.url.trim() : "(no URL)")
-      : `our interface (xaiType=${e.params.xaiType || "importance"}, dataset=${e.params.appId || "wine_quality"})`;
+    let what: string;
+    if (e.mode === "own") {
+      what = e.url.trim() ? e.url.trim() : "(no URL)";
+    } else {
+      const p = { ...STUDY_PARAM_DEFAULTS, ...e.params };
+      const formLabel = EXPLANATION_FORMS.find((f) => f.id === formOf(p))?.label ?? formOf(p);
+      const ds = STUDY_DATASETS.find((d) => d.appId === (p.appId || "wine_quality"))?.label ?? p.appId;
+      what = `our interface (${formLabel}, ${ds})`;
+    }
     const label = e.label ? `${e.label}: ` : "";
     return `${label}${who} → ${what}`;
   });

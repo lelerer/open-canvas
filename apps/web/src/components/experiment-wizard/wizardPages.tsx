@@ -10,12 +10,14 @@ import {
   Page, Answers, parseIvs, parseProcSteps, ProcStep, PROC_STEP_TYPES,
   USER_MODELS, UserModel, parseIdList, cognitiveParamsFor, CognitiveParam,
   parseApparatusList, ApparatusEntry, normalizeApparatusEntry, ivGroupOptions,
-  slugId, DATASET_OPTIONS, parseInstanceIds, instanceIdsOf,
-  STUDY_UI_BASE, STUDY_PARAM_DEFAULTS, buildStudyUrl,
+  instanceIdsOf,
+  STUDY_UI_ROOT, STUDY_PARAM_DEFAULTS, buildStudyUrl,
+  STUDY_DATASETS, EXPLANATION_FORMS, INTERFACE_ELEMENTS,
+  formOf, namespaceOf, elementsOf, modelNameFor, instanceRangeFor,
 } from "./questions";
 
 // Re-exported for backward compatibility with existing imports of these from this module.
-export { STUDY_UI_BASE, STUDY_PARAM_DEFAULTS, buildStudyUrl } from "./questions";
+export { STUDY_UI_ROOT, STUDY_PARAM_DEFAULTS, buildStudyUrl } from "./questions";
 
 export function TextBody({ page, answers, setAnswer }: { page: Page; answers: Answers; setAnswer: (id: string, v: string) => void }) {
   return (
@@ -43,20 +45,10 @@ export function TextBody({ page, answers, setAnswer }: { page: Page; answers: An
   );
 }
 
-// The deployed XAI study interface (the iframe.html app). Researchers choose the URL
-// parameters the app reads; we assemble the link and preview it. The app's own logic
-// (in iframe.html / iframe.js) is untouched.
-
-export const XAI_TYPES = ["none", "importance", "attribution", "weights", "counterfactual", "similar"];
-
-export const STUDY_WIDGETS = ["instance", "meters", "xai", "prediction", "feedback", "ground-truth"];
-
-export const STUDY_FLAGS: { key: string; label: string }[] = [
-  { key: "showPrediction", label: "showPrediction" },
-  { key: "showTutorial", label: "showTutorial" },
-  { key: "showGroundTruth", label: "showGroundTruth" },
-  { key: "userSimulation", label: "userSimulation" },
-];
+// The deployed XAI study interfaces (/local and /global iframe apps). Researchers
+// choose interface elements + material configuration; we assemble the link and
+// preview it. The apps' own logic is untouched — see questions.ts for the URL
+// contract (namespaces, fixed models, instance ranges).
 
 export function getStudyParams(a: Answers): Record<string, string> {
   let o: Record<string, string> = {};
@@ -89,18 +81,6 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
   const [editingId, setEditingId] = useState<string | null>(null);
   const pcls = "w-full rounded-md border border-neutral-200 bg-white px-2 py-1.5 text-xs outline-none focus:border-neutral-400";
 
-  // Dropdown options for the interface params, drawn from the study design where possible.
-  const ivs = parseIvs(a);
-  const uniq = (arr: string[]) => Array.from(new Set(arr.filter(Boolean)));
-  const levelsOf = (factorId: string) => {
-    const e = ivs.find((x) => x.factor === factorId);
-    return e ? (e.levels || "").split("|").map((s) => slugId(s.trim())).filter(Boolean) : [];
-  };
-  const appIdOpts = uniq([slugId(a.ds_dataset || ""), ...DATASET_OPTIONS.map(slugId), "wine_quality"]);
-  const modelOpts = uniq([...levelsOf("ai_model"), "mlp", "xgboost", "logistic_regression"]);
-  const methodOpts = uniq([...levelsOf("xai_method"), "lime", "shap", "integrated_gradients", "anchors"]);
-  const withCur = (opts: string[], cur: string) => (cur && !opts.includes(cur) ? [cur, ...opts] : opts);
-
   // Seed one configuration on first use (migrating any legacy single-config fields).
   useEffect(() => {
     if (parseApparatusList(a).length > 0) return;
@@ -121,12 +101,6 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
   function saveList(next: ApparatusEntry[]) { setAnswer("apparatus_list", JSON.stringify(next)); }
   function patchEntry(id: string, patch: Partial<ApparatusEntry>) { saveList(entries.map((e) => (e.id === id ? { ...e, ...patch } : e))); }
   function setParam(e: ApparatusEntry, k: string, v: string) { patchEntry(e.id, { params: { ...e.params, [k]: v } }); }
-  function toggleFlag(e: ApparatusEntry, k: string) { setParam(e, k, entryParams(e)[k] === "1" ? "0" : "1"); }
-  function toggleWidget(e: ApparatusEntry, w: string) {
-    const sel = (entryParams(e).widgets || "").split(",").map((s) => s.trim()).filter(Boolean);
-    const next = sel.includes(w) ? sel.filter((x) => x !== w) : [...sel, w];
-    setParam(e, "widgets", next.join(","));
-  }
   function addEntry() {
     const e = normalizeApparatusEntry({ label: `Configuration ${entries.length + 1}`, group: "All participants", mode: "ours", params: {}, url: "" });
     saveList([...entries, e]);
@@ -138,7 +112,7 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
   function builtFor(e: ApparatusEntry): string {
     const p = entryParams(e);
     const first = instanceIdsOf(p)[0] ?? p.instanceId;
-    return buildStudyUrl(STUDY_UI_BASE, { ...p, instanceId: first });
+    return buildStudyUrl(STUDY_UI_ROOT, { ...p, instanceId: first });
   }
   function previewFor(e: ApparatusEntry): string {
     if (e.mode === "own") return /^https?:\/\//i.test(e.url.trim()) ? e.url.trim() : "";
@@ -147,7 +121,10 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
   function summaryFor(e: ApparatusEntry): string {
     if (e.mode === "own") return e.url.trim() ? `Your interface · ${e.url.trim()}` : "Your interface · no URL yet";
     const p = entryParams(e);
-    return `Our interface · ${p.xaiType}, ${p.appId}`;
+    const formLabel = EXPLANATION_FORMS.find((f) => f.id === formOf(p))?.label ?? formOf(p);
+    const ds = STUDY_DATASETS.find((d) => d.appId === (p.appId || "wine_quality"))?.label ?? p.appId;
+    const n = instanceIdsOf(p).length || 1;
+    return `Our interface · ${formLabel}, ${ds} · ${n} trial${n === 1 ? "" : "s"}`;
   }
 
   return (
@@ -165,7 +142,6 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
         {entries.map((e) => {
           const editing = editingId === e.id;
           const preview = previewFor(e);
-          const sel = (entryParams(e).widgets || "").split(",").map((s) => s.trim()).filter(Boolean);
           return (
             <div key={e.id} className="rounded-xl border border-neutral-200">
               {/* header: label + group + controls */}
@@ -190,74 +166,162 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                     <button onClick={() => patchEntry(e.id, { mode: "own" })} className={cn("border-l border-neutral-200 px-3 py-1.5", e.mode === "own" ? "text-white" : "text-neutral-600 hover:bg-neutral-50")} style={e.mode === "own" ? { backgroundColor: ACCENT } : undefined}>Use my own</button>
                   </div>
 
-                  {e.mode === "ours" ? (
-                    <div className="space-y-3">
-                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                        <ParamField label="dataset">
-                          <select value={entryParams(e).appId} onChange={(ev) => setParam(e, "appId", ev.target.value)} className={pcls}>
-                            {withCur(appIdOpts, entryParams(e).appId).map((o) => (<option key={o} value={o}>{o}</option>))}
-                          </select>
-                        </ParamField>
-                        <ParamField label="modelName">
-                          <select value={entryParams(e).modelName} onChange={(ev) => setParam(e, "modelName", ev.target.value)} className={pcls}>
-                            {withCur(modelOpts, entryParams(e).modelName).map((o) => (<option key={o} value={o}>{o}</option>))}
-                          </select>
-                        </ParamField>
-                        <ParamField label="expMethod">
-                          <select value={entryParams(e).expMethod} onChange={(ev) => setParam(e, "expMethod", ev.target.value)} className={pcls}>
-                            {withCur(methodOpts, entryParams(e).expMethod).map((o) => (<option key={o} value={o}>{o}</option>))}
-                          </select>
-                        </ParamField>
-                        <ParamField label="instance IDs (trials)">
-                          <input
-                            type="text"
-                            value={entryParams(e).instanceIds ?? instanceIdsOf(entryParams(e)).join(", ")}
-                            onChange={(ev) => setParam(e, "instanceIds", ev.target.value)}
-                            placeholder="e.g. 0, 3, 7, 12 or 0-9"
-                            className={pcls}
-                          />
-                        </ParamField>
-                        <ParamField label="xaiType">
-                          <select value={entryParams(e).xaiType} onChange={(ev) => setParam(e, "xaiType", ev.target.value)} className={pcls}>
-                            {withCur([...XAI_TYPES], entryParams(e).xaiType).map((t) => (<option key={t} value={t}>{t}</option>))}
-                          </select>
-                        </ParamField>
-                        <ParamField label="userPrediction">
-                          <select value={entryParams(e).userPrediction} onChange={(ev) => setParam(e, "userPrediction", ev.target.value)} className={pcls}>
-                            {withCur(["none", "0", "1"], entryParams(e).userPrediction).map((t) => (<option key={t} value={t}>{t}</option>))}
-                          </select>
-                        </ParamField>
-                      </div>
-                      {(() => {
-                        const ids = instanceIdsOf(entryParams(e));
-                        return (
-                          <p className="text-xs text-neutral-400">
-                            {ids.length ? (
-                              <>Generates <span className="font-medium text-neutral-600">{ids.length}</span> trial{ids.length === 1 ? "" : "s"} for this group — instances {ids.join(", ")}. Each participant sees one instance per trial.</>
+                  {e.mode === "ours" ? (() => {
+                    const p = entryParams(e);
+                    const form = formOf(p);
+                    const ns = namespaceOf(p);
+                    const els = elementsOf(p);
+                    const range = instanceRangeFor(p);
+                    const ids = instanceIdsOf(p);
+                    const badIds = ids.filter((id) => { const n = Number(id); return !Number.isInteger(n) || n < range.min || n > range.max; });
+                    const dsLabel = STUDY_DATASETS.find((d) => d.appId === (p.appId || "wine_quality"))?.label ?? p.appId;
+                    const available = (el: { key: string; localOnly?: boolean }) => !(ns === "global" && el.localOnly);
+                    const toggleElement = (k: string) => {
+                      if (k === "instance") return; // always shown, cannot be deselected
+                      const next = els.includes(k) ? els.filter((x) => x !== k) : [...els, k];
+                      setParam(e, "elements", next.join(","));
+                    };
+                    const selectAll = () => setParam(e, "elements", INTERFACE_ELEMENTS.filter(available).map((x) => x.key).join(","));
+                    const flagCheck = (label: string, on: boolean, toggle: () => void) => (
+                      <label key={label} className="flex cursor-pointer items-center gap-2 text-sm text-neutral-700">
+                        <input type="checkbox" checked={on} onChange={toggle} className="h-4 w-4" style={{ accentColor: ACCENT }} />
+                        {label}
+                      </label>
+                    );
+                    return (
+                      <div className="space-y-4">
+                        {/* Choose interface elements */}
+                        <div>
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Choose interface elements</p>
+                              <p className="mt-0.5 text-xs text-neutral-400">All available forms are shown below. Select any combination for the participant screen.</p>
+                            </div>
+                            <button type="button" onClick={selectAll} className="shrink-0 text-xs font-semibold" style={{ color: ACCENT }}>Select all</button>
+                          </div>
+                          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                            {INTERFACE_ELEMENTS.map((el) => {
+                              const enabled = available(el);
+                              const locked = enabled && !!el.required;
+                              const on = enabled && (locked || els.includes(el.key));
+                              const accent = on && !locked; // locked cards get a muted grey look instead of the accent
+                              return (
+                                <button
+                                  key={el.key}
+                                  type="button"
+                                  disabled={!enabled || locked}
+                                  onClick={() => toggleElement(el.key)}
+                                  className={cn(
+                                    "flex items-center justify-between gap-3 rounded-xl border p-3 text-left transition-colors",
+                                    !enabled ? "cursor-not-allowed border-neutral-200 opacity-40"
+                                      : locked ? "cursor-default border-neutral-200 bg-neutral-100/80"
+                                        : accent ? ""
+                                          : "border-neutral-200 hover:bg-neutral-50"
+                                  )}
+                                  style={accent ? { borderColor: ACCENT, backgroundColor: `${ACCENT}14` } : undefined}
+                                  title={!enabled ? "Not supported by the surrogate (LR / decision-tree) interface" : locked ? "Always shown to participants — cannot be turned off" : undefined}
+                                >
+                                  <span className="min-w-0">
+                                    <span className={cn("block text-sm font-semibold", locked ? "text-neutral-500" : "text-neutral-900")}>{el.label}</span>
+                                    <span className={cn("mt-0.5 block text-xs", locked ? "text-neutral-400" : "text-neutral-500")}>{el.sub}{locked ? " — always shown" : ""}</span>
+                                  </span>
+                                  <span
+                                    className={cn("grid h-5 w-5 shrink-0 place-items-center rounded-[5px] border", locked ? "border-transparent bg-neutral-400 text-white" : on ? "border-transparent text-white" : "border-neutral-300 bg-white")}
+                                    style={accent ? { backgroundColor: ACCENT } : undefined}
+                                  >
+                                    {on ? <Check className="h-3 w-3" /> : null}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                          {ns === "global" ? <p className="mt-1 text-xs text-neutral-400">Greyed-out elements aren't supported by the surrogate (LR / decision-tree) interface.</p> : null}
+                        </div>
+
+                        {/* Material configuration */}
+                        <div>
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Material configuration</p>
+                          <p className="mt-0.5 text-xs text-neutral-400">Choose the data, model, explanation, and example shown in the preview.</p>
+                          <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                            <ParamField label="Dataset">
+                              <select value={p.appId || "wine_quality"} onChange={(ev) => setParam(e, "appId", ev.target.value)} className={pcls}>
+                                {STUDY_DATASETS.map((d) => (<option key={d.appId} value={d.appId}>{d.label}</option>))}
+                              </select>
+                            </ParamField>
+                            <ParamField label="AI model">
+                              <div className={cn(pcls, "bg-neutral-50 text-neutral-500")} title="Fixed by the dataset and explanation form">{modelNameFor(p) === "mlp" ? "MLP" : "XGBoost"}</div>
+                            </ParamField>
+                            <ParamField label="Explanation form">
+                              <select value={form} onChange={(ev) => setParam(e, "form", ev.target.value)} className={pcls}>
+                                {EXPLANATION_FORMS.map((f) => (<option key={f.id} value={f.id}>{f.label}</option>))}
+                              </select>
+                            </ParamField>
+                            {ns === "local" ? (
+                              <ParamField label="Explanation method">
+                                <select value={p.expMethod === "lime" ? "lime" : "shap"} onChange={(ev) => setParam(e, "expMethod", ev.target.value)} className={pcls}>
+                                  <option value="shap">SHAP</option>
+                                  <option value="lime">LIME</option>
+                                </select>
+                              </ParamField>
+                            ) : form === "LR" ? (
+                              <ParamField label="LR variant">
+                                <select value={p.LRVariant === "sparse" ? "sparse" : "dense"} onChange={(ev) => setParam(e, "LRVariant", ev.target.value)} className={pcls}>
+                                  <option value="dense">Dense</option>
+                                  <option value="sparse">Sparse</option>
+                                </select>
+                              </ParamField>
                             ) : (
-                              <span className="text-amber-600">Enter at least one instance ID (e.g. <code>0, 3, 7</code> or a range <code>0-9</code>) — this defines the trials in the generated survey.</span>
+                              <ParamField label="Tree depth">
+                                <select value={p.DTDepth === "2" ? "2" : "3"} onChange={(ev) => setParam(e, "DTDepth", ev.target.value)} className={pcls}>
+                                  <option value="2">2</option>
+                                  <option value="3">3</option>
+                                </select>
+                              </ParamField>
                             )}
-                          </p>
-                        );
-                      })()}
-                      <div>
-                        <span className="text-[11px] uppercase tracking-wide text-neutral-400">Flags</span>
-                        <div className="mt-1 flex flex-wrap gap-2">
-                          {STUDY_FLAGS.map((f) => (<ParamCheck key={f.key} label={f.label} on={entryParams(e)[f.key] === "1"} onToggle={() => toggleFlag(e, f.key)} />))}
+                            <ParamField label={`Data instances (trials) · ${range.min}–${range.max}`}>
+                              <input
+                                type="text"
+                                value={p.instanceIds ?? ids.join(", ")}
+                                onChange={(ev) => setParam(e, "instanceIds", ev.target.value)}
+                                placeholder="e.g. 0, 3, 7 or 0-9"
+                                className={pcls}
+                              />
+                            </ParamField>
+                            {ns === "local" ? (
+                              <ParamField label="User selection">
+                                <select value={p.userPrediction ?? "none"} onChange={(ev) => setParam(e, "userPrediction", ev.target.value)} className={pcls}>
+                                  <option value="none">No selection</option>
+                                  <option value="0">Class 0</option>
+                                  <option value="1">Class 1</option>
+                                </select>
+                              </ParamField>
+                            ) : null}
+                          </div>
+
+                          {ids.length ? (
+                            <p className="mt-2 text-xs text-neutral-400">Generates <span className="font-medium text-neutral-600">{ids.length}</span> trial{ids.length === 1 ? "" : "s"} for this group — instances {ids.join(", ")}. Each participant sees one instance per trial.</p>
+                          ) : (
+                            <p className="mt-2 text-xs text-amber-600">Enter at least one instance ID (e.g. <code>0, 3, 7</code> or a range <code>0-9</code>) — this defines the trials in the generated survey.</p>
+                          )}
+                          {badIds.length ? (
+                            <p className="mt-1 text-xs font-medium text-red-600">Out of range for {dsLabel} (the {ns} interface allows {range.min}–{range.max}): {badIds.join(", ")}. The two interfaces index different corpora — re-check IDs after changing the explanation form.</p>
+                          ) : null}
+
+                          <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2">
+                            {ns === "local" ? flagCheck("Focus the participant on important features", p.focusOnImportant === "1", () => setParam(e, "focusOnImportant", p.focusOnImportant === "1" ? "0" : "1")) : null}
+                            {ns === "global" && form === "DT" ? flagCheck("Participant edits the tree", p.DTEditor === "1", () => setParam(e, "DTEditor", p.DTEditor === "1" ? "0" : "1")) : null}
+                            {ns === "global" ? flagCheck("Show the explanation's prediction", p.showExplanationPrediction !== "0", () => setParam(e, "showExplanationPrediction", p.showExplanationPrediction === "0" ? "1" : "0")) : null}
+                            {ns === "global" && els.includes("sliders") ? flagCheck("Ask participants to confirm slider changes (recourse)", p.recourseConfirm === "1", () => setParam(e, "recourseConfirm", p.recourseConfirm === "1" ? "0" : "1")) : null}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <code className="min-w-0 flex-1 truncate rounded-md border border-neutral-200 bg-neutral-50 px-2 py-1.5 text-xs text-neutral-600">{builtFor(e)}</code>
+                          <a href={builtFor(e)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md border border-neutral-200 px-3 py-1.5 text-sm text-neutral-600 hover:bg-neutral-50">Open ↗</a>
                         </div>
                       </div>
-                      <div>
-                        <span className="text-[11px] uppercase tracking-wide text-neutral-400">widgets shown <span className="normal-case text-neutral-400">(leave all off = show everything)</span></span>
-                        <div className="mt-1 flex flex-wrap gap-2">
-                          {STUDY_WIDGETS.map((w) => (<ParamCheck key={w} label={w} on={sel.includes(w)} onToggle={() => toggleWidget(e, w)} />))}
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <code className="min-w-0 flex-1 truncate rounded-md border border-neutral-200 bg-neutral-50 px-2 py-1.5 text-xs text-neutral-600">{builtFor(e)}</code>
-                        <a href={builtFor(e)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md border border-neutral-200 px-3 py-1.5 text-sm text-neutral-600 hover:bg-neutral-50">Open ↗</a>
-                      </div>
-                    </div>
-                  ) : (
+                    );
+                  })() : (
                     <div>
                       <div className="flex items-center gap-2">
                         <input value={e.url} onChange={(ev) => patchEntry(e.id, { url: ev.target.value })} placeholder="https://your-study-build.example.com" className="flex-1 rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-400" />

@@ -18,7 +18,7 @@
 
 import {
   Answers, parseApparatusList, ApparatusEntry, instanceIdsOf,
-  STUDY_UI_BASE, STUDY_PARAM_DEFAULTS, buildStudyUrl,
+  STUDY_UI_ROOT, STUDY_PARAM_DEFAULTS, buildStudyUrl,
 } from "./questions";
 
 /* ----------------------------- Survey model ----------------------------- */
@@ -78,7 +78,7 @@ export function studyUrlForInstance(e: ApparatusEntry, id: string): string {
     return `${u}${sep}instanceId=${encodeURIComponent(id)}`;
   }
   const p = { ...STUDY_PARAM_DEFAULTS, ...e.params, instanceId: id };
-  return buildStudyUrl(STUDY_UI_BASE, p);
+  return buildStudyUrl(STUDY_UI_ROOT, p);
 }
 
 /* ----------------------------- Build the survey ----------------------------- */
