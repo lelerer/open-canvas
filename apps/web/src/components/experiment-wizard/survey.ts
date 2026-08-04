@@ -18,7 +18,7 @@
 
 import {
   Answers, parseApparatusList, ApparatusEntry, instanceIdsOf,
-  STUDY_UI_ROOT, STUDY_PARAM_DEFAULTS, buildStudyUrl,
+  STUDY_UI_ROOT, STUDY_PARAM_DEFAULTS, buildStudyUrl, studyNaturalSize,
 } from "./questions";
 
 /* ----------------------------- Survey model ----------------------------- */
@@ -125,10 +125,13 @@ export function buildSurvey(a: Answers): Survey {
     const ids = trialIds.length ? trialIds : ["0"];
     const label = e.label?.trim() || (isCommonGroup(e.group) ? "Apparatus" : e.group);
     const questions: SQuestion[] = [];
+    const nat = studyNaturalSize(e.mode, { ...STUDY_PARAM_DEFAULTS, ...e.params });
     ids.forEach((id, i) => {
       const url = studyUrlForInstance(e, id);
+      // The embed renders at the interface's natural size and is scaled to fit the
+      // question column by the per-question JS (IFRAME_FIT_JS) so nothing is clipped.
       const iframe = url
-        ? `<iframe src="${esc(url)}" style="width:100%;height:600px;border:1px solid #ccc;" allow="fullscreen"></iframe>`
+        ? `<div style="width:100%;overflow:hidden;"><iframe src="${esc(url)}" data-natural-width="${nat.w}" data-natural-height="${nat.h}" style="width:100%;height:700px;border:1px solid #ccc;" allow="fullscreen"></iframe></div>`
         : `<em>(no interface URL configured)</em>`;
       questions.push(
         db(
@@ -215,6 +218,35 @@ function timestamp(): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+// Qualtrics per-question JS: scale any natural-size iframe down to the question
+// column width so the full interface is visible (the embedded pages are wider
+// than the survey column and do not scroll internally).
+const IFRAME_FIT_JS = `Qualtrics.SurveyEngine.addOnload(function() {
+  var qc = this.getQuestionContainer();
+  var frames = qc.querySelectorAll('iframe[data-natural-width]');
+  for (var i = 0; i < frames.length; i++) {
+    (function(f) {
+      var nw = parseInt(f.getAttribute('data-natural-width'), 10) || 1280;
+      var nh = parseInt(f.getAttribute('data-natural-height'), 10) || 900;
+      var wrap = f.parentElement;
+      function fit() {
+        var w = wrap.clientWidth || qc.clientWidth || nw;
+        var s = Math.min(1, w / nw);
+        f.style.width = nw + 'px';
+        f.style.height = nh + 'px';
+        f.style.transform = 'scale(' + s + ')';
+        f.style.webkitTransform = 'scale(' + s + ')';
+        f.style.transformOrigin = '0 0';
+        f.style.webkitTransformOrigin = '0 0';
+        wrap.style.height = Math.ceil(nh * s) + 'px';
+        wrap.style.overflow = 'hidden';
+      }
+      fit();
+      window.addEventListener('resize', fit);
+    })(frames[i]);
+  }
+});`;
+
 function questionPayload(q: SQuestion): any {
   const base: any = {
     QuestionID: q.qid,
@@ -229,7 +261,15 @@ function questionPayload(q: SQuestion): any {
     Language: [],
   };
   if (q.type === "DB") {
-    return { ...base, Selector: "TB", ChoiceOrder: [], Validation: { Settings: { Type: "None" } }, NextChoiceId: 1, NextAnswerId: 1 };
+    return {
+      ...base,
+      Selector: "TB",
+      ChoiceOrder: [],
+      Validation: { Settings: { Type: "None" } },
+      NextChoiceId: 1,
+      NextAnswerId: 1,
+      ...(/<iframe[^>]*data-natural-width/.test(q.text) ? { QuestionJS: IFRAME_FIT_JS } : {}),
+    };
   }
   if (q.type === "TE") {
     return {

@@ -776,6 +776,17 @@ export function namespaceOf(p: Record<string, string>): "local" | "global" {
   return f === "LR" || f === "DT" ? "global" : "local";
 }
 
+// The "natural" canvas size each interface needs to lay out fully. Embeds render
+// at this size and are then scaled down to fit their container, so nothing gets
+// clipped. Sizes were measured against the deployed renderers (largest variant per
+// namespace, sliders included): local ≤ 1007×540, global ≤ 1135×882 — the canvas
+// adds a small margin. Don't make these bigger than needed: the pages centre and
+// scale up with extra width, which shrinks the final scaled-down text.
+export function studyNaturalSize(mode: string, params: Record<string, string>): { w: number; h: number } {
+  if (mode === "own") return { w: 1280, h: 800 };
+  return namespaceOf(params) === "global" ? { w: 1280, h: 900 } : { w: 1100, h: 620 };
+}
+
 export function elementsOf(p: Record<string, string>): string[] {
   const raw = p.elements != null ? p.elements : p.widgets != null ? p.widgets : "instance,xai,prediction";
   const els = raw.split(",").map((s) => s.trim()).filter(Boolean).map((k) => (k === "simulation" ? "sliders" : k));

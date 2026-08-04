@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, type ReactNode } from "react";
+import React, { useState, useEffect, useRef, type ReactNode } from "react";
 import { Upload, Plus, X, Wand2, ChevronLeft, ChevronRight, Play, BarChart3, Check, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,7 +13,7 @@ import {
   instanceIdsOf,
   STUDY_UI_ROOT, STUDY_PARAM_DEFAULTS, buildStudyUrl,
   STUDY_DATASETS, EXPLANATION_FORMS, INTERFACE_ELEMENTS,
-  formOf, namespaceOf, elementsOf, modelNameFor, instanceRangeFor,
+  formOf, namespaceOf, elementsOf, instanceRangeFor, studyNaturalSize,
 } from "./questions";
 
 // Re-exported for backward compatibility with existing imports of these from this module.
@@ -54,6 +54,33 @@ export function getStudyParams(a: Answers): Record<string, string> {
   let o: Record<string, string> = {};
   try { o = JSON.parse(a.study_params || "{}"); } catch { o = {}; }
   return { ...STUDY_PARAM_DEFAULTS, ...o };
+}
+
+// Renders an iframe at its interface's natural canvas size, scaled down to fit
+// the container width — the whole page is always visible, nothing is clipped.
+export function ScaledIframe({ src, title, naturalW, naturalH }: { src: string; title: string; naturalW: number; naturalH: number }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [w, setW] = useState(0);
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setW(el.clientWidth));
+    ro.observe(el);
+    setW(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+  const scale = w > 0 ? Math.min(1, w / naturalW) : 1;
+  return (
+    <div ref={wrapRef} className="w-full overflow-hidden" style={{ height: Math.ceil(naturalH * scale) }}>
+      <iframe
+        key={src}
+        src={src}
+        title={title}
+        style={{ width: naturalW, height: naturalH, transform: `scale(${scale})`, transformOrigin: "top left", border: 0 }}
+        sandbox="allow-scripts allow-same-origin allow-forms"
+      />
+    </div>
+  );
 }
 
 export function ParamField({ label, children }: { label: string; children: ReactNode }) {
@@ -241,15 +268,12 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                         {/* Material configuration */}
                         <div>
                           <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Material configuration</p>
-                          <p className="mt-0.5 text-xs text-neutral-400">Choose the data, model, explanation, and example shown in the preview.</p>
+                          <p className="mt-0.5 text-xs text-neutral-400">Choose the data, explanation, and example shown in the preview. The AI model is set automatically by the dataset.</p>
                           <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
                             <ParamField label="Dataset">
                               <select value={p.appId || "wine_quality"} onChange={(ev) => setParam(e, "appId", ev.target.value)} className={pcls}>
                                 {STUDY_DATASETS.map((d) => (<option key={d.appId} value={d.appId}>{d.label}</option>))}
                               </select>
-                            </ParamField>
-                            <ParamField label="AI model">
-                              <div className={cn(pcls, "bg-neutral-50 text-neutral-500")} title="Fixed by the dataset and explanation form">{modelNameFor(p) === "mlp" ? "MLP" : "XGBoost"}</div>
                             </ParamField>
                             <ParamField label="Explanation form">
                               <select value={form} onChange={(ev) => setParam(e, "form", ev.target.value)} className={pcls}>
@@ -335,7 +359,7 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                     <span className="text-[11px] uppercase tracking-wide text-neutral-400">Preview</span>
                     {preview ? (
                       <div className="mt-1 overflow-hidden rounded-lg border border-neutral-200 bg-white">
-                        <iframe key={preview} src={preview} title={`Preview ${e.label}`} className="h-[380px] w-full" sandbox="allow-scripts allow-same-origin allow-forms" />
+                        {(() => { const nat = studyNaturalSize(e.mode, entryParams(e)); return <ScaledIframe src={preview} title={`Preview ${e.label}`} naturalW={nat.w} naturalH={nat.h} />; })()}
                       </div>
                     ) : (
                       <div className="mt-1 grid h-[160px] place-items-center rounded-lg border border-dashed border-neutral-300 bg-neutral-50/50 text-sm text-neutral-400">Paste a URL to preview.</div>

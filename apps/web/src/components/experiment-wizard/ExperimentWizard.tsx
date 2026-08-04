@@ -151,7 +151,7 @@ export function ExperimentWizard() {
           ) : page.kind === "results" ? (
             <ResultsBody answers={answers} setAnswer={setAnswer} />
           ) : (
-            <div className="mx-auto w-full max-w-2xl px-6 py-10">
+            <div className={cn("mx-auto w-full px-6 py-10", page.kind === "apparatus" ? "max-w-4xl" : "max-w-2xl")}>
               {page.kind === "text" ? (
                 <TextBody page={page} answers={answers} setAnswer={setAnswer} />
               ) : page.kind === "studydesign" ? (
