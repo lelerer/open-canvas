@@ -267,50 +267,24 @@ export function VariableList({ valueKey, answers, setAnswer, namePlaceholder }: 
 
 export function DatasetPicker({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
   const a = answers;
-  // user-uploaded CSV names are remembered in ds_custom_datasets (comma-joined)
-  const custom = (a.ds_custom_datasets || "").split("|").map((s) => s.trim()).filter(Boolean);
-  const options = [...DATASET_OPTIONS, ...custom];
-
-  function onUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const name = file.name.replace(/\.csv$/i, "");
-    const nextCustom = Array.from(new Set([...custom, name]));
-    setAnswer("ds_custom_datasets", nextCustom.join(" | "));
-    setAnswer("ds_dataset", name);
-    e.target.value = "";
-  }
-
   return (
     <div style={{ fontFamily: "ui-sans-serif, system-ui" }}>
-      <div className="flex flex-wrap items-center gap-3">
-        <select
-          value={a.ds_dataset ?? ""}
-          onChange={(e) => setAnswer("ds_dataset", e.target.value)}
-          className={cn("min-w-[12rem] rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-400", a.ds_dataset ? "text-neutral-900" : "text-neutral-400")}
-        >
-          <option value="">— Select a dataset —</option>
-          <optgroup label="Available">
-            {DATASET_OPTIONS.map((d) => (<option key={d} value={d} className="text-neutral-900">{d}</option>))}
+      <select
+        value={a.ds_dataset ?? ""}
+        onChange={(e) => setAnswer("ds_dataset", e.target.value)}
+        className={cn("min-w-[12rem] rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-400", a.ds_dataset ? "text-neutral-900" : "text-neutral-400")}
+      >
+        <option value="">— Select a dataset —</option>
+        <optgroup label="Available">
+          {DATASET_OPTIONS.map((d) => (<option key={d} value={d} className="text-neutral-900">{d}</option>))}
+        </optgroup>
+        {(a.ds_dataset || "").trim() && !DATASET_OPTIONS.includes((a.ds_dataset || "").trim()) ? (
+          <optgroup label="Set by assistant">
+            <option value={(a.ds_dataset || "").trim()} className="text-neutral-900">{(a.ds_dataset || "").trim()}</option>
           </optgroup>
-          {custom.length ? (
-            <optgroup label="Your uploads">
-              {custom.map((d) => (<option key={d} value={d} className="text-neutral-900">{d}</option>))}
-            </optgroup>
-          ) : null}
-          {(a.ds_dataset || "").trim() && ![...DATASET_OPTIONS, ...custom].includes((a.ds_dataset || "").trim()) ? (
-            <optgroup label="Set by assistant">
-              <option value={(a.ds_dataset || "").trim()} className="text-neutral-900">{(a.ds_dataset || "").trim()}</option>
-            </optgroup>
-          ) : null}
-        </select>
-
-        <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-dashed border-neutral-300 px-3 py-2 text-sm font-medium text-neutral-600 hover:bg-neutral-50">
-          <Upload className="h-4 w-4" /> Upload CSV
-          <input type="file" accept=".csv,text/csv" onChange={onUpload} className="hidden" />
-        </label>
-      </div>
-      <p className="mt-1.5 text-xs text-neutral-400">Pick a built-in dataset or upload your own CSV (the file name is recorded; data stays in your browser).</p>
+        ) : null}
+      </select>
+      <p className="mt-1.5 text-xs text-neutral-400">Pick one of the built-in datasets.</p>
     </div>
   );
 }
@@ -376,12 +350,11 @@ export function IvLevelEditor({ factor, entry, agent, onPatch, answers }: { fact
   const cogParams = factor.kind === "cognitive" && factor.cognitiveByAgent ? factor.cognitiveByAgent[agent] ?? [] : [];
   const cogParam = cogParams.find((p) => p.name === entry.cogParam) || null;
 
-  // Categorical options. For the Dataset factor, offer every dataset (plus the
-  // researcher's uploads) so multiple can be compared — not just the agent's few.
+  // Categorical options. For the Dataset factor, offer every built-in dataset so
+  // multiple can be compared — not just the agent's few.
   const isDataset = factor.id === "dataset";
-  const datasetUploads = isDataset ? (answers?.ds_custom_datasets || "").split("|").map((s) => s.trim()).filter(Boolean) : [];
   const categoricalOptions = Array.from(new Set([
-    ...(isDataset ? [...DATASET_OPTIONS, ...datasetUploads] : ivLevelsFor(factor, agent)),
+    ...(isDataset ? DATASET_OPTIONS : ivLevelsFor(factor, agent)),
     ...levels, // keep any already-selected value visible even if not in the base list
   ]));
 
@@ -469,6 +442,12 @@ export function IvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer:
   const factors = [...ivFactorsForAgent(agent), ...customs];
   const findFactor = (id: string) => factors.find((f) => f.id === id) || null;
 
+  // XAI Property is exclusive — it cannot be combined with any other IV.
+  const hasXaiPropElsewhere = (i: number) => ivs.some((e, j) => j !== i && e.factor === "xai_property");
+  const hasOtherElsewhere = (i: number) => ivs.some((e, j) => j !== i && e.factor && e.factor !== "xai_property");
+  const hasXaiProp = ivs.some((e) => e.factor === "xai_property");
+  const mixedXaiProp = hasXaiProp && ivs.some((e) => e.factor && e.factor !== "xai_property");
+
   // One-time migration from the old single-IV fields.
   useEffect(() => {
     if (!a.sd_ivs && a.sd_iv_factor) {
@@ -545,10 +524,17 @@ export function IvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer:
                   onChange={(e) => setFactor(i, e.target.value)}
                   className={cn("max-w-[18rem] flex-1 truncate border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none focus:border-neutral-500", entry.factor ? "text-neutral-900" : "text-neutral-400")}
                 >
-                  {!entry.factor ? <option value="">a factor</option> : null}
+                  {!entry.factor ? <option value="" disabled hidden>Select a factor…</option> : null}
                   {grouped.map((g) => (
                     <optgroup key={g.group} label={g.group}>
-                      {g.items.map((f) => (<option key={f.id} value={f.id} title={f.def} className="text-neutral-900">{f.label}</option>))}
+                      {g.items.map((f) => {
+                        const blocked = f.id === "xai_property" ? hasOtherElsewhere(i) : hasXaiPropElsewhere(i);
+                        return (
+                          <option key={f.id} value={f.id} disabled={blocked} title={blocked ? "XAI Property cannot be combined with other IVs" : f.def} className="text-neutral-900">
+                            {f.label}{blocked ? " (not combinable)" : ""}
+                          </option>
+                        );
+                      })}
                     </optgroup>
                   ))}
                 </select>
@@ -576,10 +562,27 @@ export function IvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer:
           );
         })}
 
+        {mixedXaiProp ? (
+          <p className="text-sm font-medium text-red-600">XAI Property cannot be combined with other independent variables — remove one of them.</p>
+        ) : null}
+
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" onClick={addIv} className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:bg-neutral-50">
-            <Plus className="h-4 w-4" /> Add independent variable
-          </button>
+          {/* Hover goes on the wrapper: disabled buttons don't fire hover events. */}
+          <span className="group relative inline-block">
+            <button
+              type="button"
+              onClick={addIv}
+              disabled={hasXaiProp}
+              className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Plus className="h-4 w-4" /> Add independent variable
+            </button>
+            {hasXaiProp ? (
+              <span className="pointer-events-none absolute left-0 top-full z-10 mt-1.5 hidden w-max max-w-[20rem] rounded-md bg-neutral-800 px-2.5 py-1.5 text-xs leading-relaxed text-white shadow-md group-hover:block">
+                XAI Property is an exclusive IV — remove it to add other independent variables.
+              </span>
+            ) : null}
+          </span>
           <button type="button" onClick={() => setShowAdd((v) => !v)} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium" style={{ color: ACCENT }}>
             <Upload className="h-4 w-4" /> Add IV type
           </button>

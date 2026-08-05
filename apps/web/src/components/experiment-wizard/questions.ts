@@ -135,9 +135,14 @@ export const IV_CATALOG: IvFactor[] = [
       CoXAM: ["Decision Tree", "Logistic Regression Weights (paper)", "Decision List", "Interpretable Decision Sets"],
     },
   },
-  { id: "faithfulness", label: "Faithfulness (XAI Fidelity)", kind: "range", group: "Explanation (XAI)", def: "How well the explanation reflects the AI's actual reasoning.", range: { min: 0, max: 100 }, note: "Usually controlled at 80%." },
-  { id: "robustness", label: "Robustness", kind: "binary", group: "Explanation (XAI)", def: "Whether the explanation stays stable under small input changes.", binary: ["Robust", "Not robust"] },
-  { id: "sparsity", label: "Sparsity", kind: "binary", group: "Explanation (XAI)", def: "Whether the explanation highlights few features (sparse) or many.", binary: ["Sparse", "Not sparse"] },
+  {
+    id: "xai_property",
+    label: "XAI Property",
+    kind: "categorical",
+    group: "Explanation (XAI)",
+    def: "Which property the explanation satisfies — faithful, sparse, robust, or sparse_robust. Runs on the Sim2Real synthetic-AI interface (exclusive: no other IVs).",
+    levels: ["faithful", "sparse", "robust", "sparse_robust"],
+  },
   { id: "tested_xai", label: "Tested with XAI", kind: "binary", group: "Explanation (XAI)", def: "Whether a trial shows an explanation or not.", binary: ["With XAI", "Without XAI"], note: "Trial-level randomized, within-subjects." },
 
   { id: "num_attributes", label: "Number of Attributes", kind: "range", group: "Data & Model", def: "How many input features are shown for each instance.", range: { min: 1, max: 10 } },
@@ -331,6 +336,12 @@ export function ivCellCount(e: IvEntry): number {
 
 export function totalCells(ivs: IvEntry[]): number {
   return ivs.reduce((n, e) => n * Math.max(1, ivCellCount(e)), 1);
+}
+
+// XAI Property is an exclusive IV: when manipulated, the study runs on the
+// Sim2Real interface and no other IV may be combined with it.
+export function hasXaiPropertyIv(a: Answers): boolean {
+  return parseIvs(a).some((e) => e.factor === "xai_property");
 }
 
 // Participants are split only across the between-subjects cells.
@@ -738,7 +749,20 @@ export const STUDY_DATASETS: StudyDataset[] = [
   { appId: "mushrooms", label: "Mushroom", localMax: 3938 },
   { appId: "wine_quality", label: "Wine Quality", localMax: 121 },
   { appId: "forest_cover", label: "Forest Cover", localMax: 299 },
+  // Sim2Real synthetic-AI study (XAI Property designs) — served from local/sim2real/study.html
+  { appId: "adult_sim2real", label: "Adult Income (XAI Property)", localMax: 38 },
 ];
+
+export const EXPLANATION_PROPERTIES = ["faithful", "sparse", "robust", "sparse_robust"];
+
+// The property condition of a Sim2Real config. The study.html contract reuses the
+// expMethod param for this (faithful|robust|sparse|sparse_robust, default robust);
+// expProperty is accepted as a legacy key from earlier saved configs.
+export function sim2realPropertyOf(p: Record<string, string>): string {
+  if (EXPLANATION_PROPERTIES.includes(p.expMethod)) return p.expMethod;
+  if (EXPLANATION_PROPERTIES.includes(p.expProperty)) return p.expProperty;
+  return "robust";
+}
 
 export const EXPLANATION_FORMS: { id: string; label: string; ns: "local" | "global" }[] = [
   { id: "attribution", label: "Feature attribution", ns: "local" },
@@ -771,7 +795,8 @@ export function formOf(p: Record<string, string>): string {
   return "attribution";
 }
 
-export function namespaceOf(p: Record<string, string>): "local" | "global" {
+export function namespaceOf(p: Record<string, string>): "local" | "global" | "sim2real" {
+  if ((p.appId || "") === "adult_sim2real") return "sim2real";
   const f = formOf(p);
   return f === "LR" || f === "DT" ? "global" : "local";
 }
@@ -799,7 +824,9 @@ export function elementsOf(p: Record<string, string>): string[] {
 // modelName is fixed by dataset (and, in global LR, by the dataset too) — never user-chosen.
 export function modelNameFor(p: Record<string, string>): string {
   const appId = p.appId || "wine_quality";
-  if (namespaceOf(p) === "global") return formOf(p) === "LR" && appId === "forest_cover" ? "xgboost" : "mlp";
+  const ns = namespaceOf(p);
+  if (ns === "sim2real") return "synthetic_ai";
+  if (ns === "global") return formOf(p) === "LR" && appId === "forest_cover" ? "xgboost" : "mlp";
   return appId === "adult" || appId === "forest_cover" ? "xgboost" : "mlp";
 }
 
@@ -811,8 +838,10 @@ export function instanceRangeFor(p: Record<string, string>): { min: number; max:
   return { min: 0, max: ds ? ds.localMax : 299 };
 }
 
+// NOTE: expMethod is intentionally NOT defaulted here — its default depends on the
+// namespace (local → SHAP, sim2real → LIME) and is resolved in buildStudyUrl / the UI.
 export const STUDY_PARAM_DEFAULTS: Record<string, string> = {
-  appId: "wine_quality", expMethod: "shap", instanceId: "0",
+  appId: "wine_quality", instanceId: "0",
   LRVariant: "dense", DTDepth: "3", DTEditor: "0",
   focusOnImportant: "0", userPrediction: "none",
   showExplanationPrediction: "1", recourseConfirm: "0",
@@ -826,6 +855,19 @@ export function buildStudyUrl(root: string, p: Record<string, string>): string {
   // "XAI visualization" unchecked → xaiType=none. No elements selected at all
   // means "show everything" (the host's default when widgets is omitted).
   const xaiOn = has("xai") || els.length === 0;
+  if (ns === "sim2real") {
+    // Sim2Real (XAI Property) study screen. expMethod carries the PROPERTY condition
+    // (not shap/lime); there is no modelName and no widgets. All flags emitted bare 1/0.
+    const q2 = new URLSearchParams();
+    q2.set("appId", p.appId || "adult_sim2real");
+    q2.set("instanceId", p.instanceId ?? "0");
+    q2.set("expMethod", sim2realPropertyOf(p));
+    q2.set("showDelta", p.showDelta === "0" ? "0" : "1");
+    q2.set("showPrediction", p.showPrediction === "0" ? "0" : "1");
+    q2.set("showQuestion", p.showQuestion === "0" ? "0" : "1");
+    q2.set("showFeedback", p.showFeedback === "1" ? "1" : "0");
+    return `${root}/local/sim2real/study.html?${q2.toString()}`;
+  }
   const q = new URLSearchParams();
   q.set("appId", p.appId || "wine_quality");
   q.set("instanceId", p.instanceId ?? "0");
@@ -936,9 +978,11 @@ export function apparatusSummaryLines(a: Answers): string[] {
       what = e.url.trim() ? e.url.trim() : "(no URL)";
     } else {
       const p = { ...STUDY_PARAM_DEFAULTS, ...e.params };
-      const formLabel = EXPLANATION_FORMS.find((f) => f.id === formOf(p))?.label ?? formOf(p);
       const ds = STUDY_DATASETS.find((d) => d.appId === (p.appId || "wine_quality"))?.label ?? p.appId;
-      what = `our interface (${formLabel}, ${ds})`;
+      const desc = namespaceOf(p) === "sim2real"
+        ? `XAI Property: ${sim2realPropertyOf(p)}`
+        : EXPLANATION_FORMS.find((f) => f.id === formOf(p))?.label ?? formOf(p);
+      what = `our interface (${desc}, ${ds})`;
     }
     const label = e.label ? `${e.label}: ` : "";
     return `${label}${who} → ${what}`;

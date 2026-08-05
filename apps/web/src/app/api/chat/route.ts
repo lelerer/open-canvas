@@ -34,7 +34,7 @@ Domain knowledge for the independent variable (levels depend on the model):
 - XAI method — CoAX: LIME, SHAP, Integrated gradients, Input gradients (paper), LRP, Captum DeepLift; CoXAM: Decision tree, Logistic regression weights (paper), Decision list, Interpretable decision sets
 - Number of attributes (1–10); Number of training instances (1–14; CoAX default 10, test 18)
 - Dataset — Adult Income (CoAX only), Mushroom (CoXAM only), Wine Quality, Forest Cover
-- Faithfulness (usually controlled ~80%); Robustness (robust vs not); Sparsity (sparse vs not); AI model (MLP / XGBoost, usually controlled by dataset); Tested-with-XAI (with vs without, within-subjects)
+- XAI Property — faithful / sparse / robust / sparse_robust (the Sim2Real synthetic-AI study; EXCLUSIVE: cannot be combined with any other IV, and the apparatus must use the "adult_sim2real" dataset); AI model (MLP / XGBoost, usually controlled by dataset); Tested-with-XAI (with vs without, within-subjects)
 - Cognitive parameters — CoAX: Retrieval Threshold [-2.3,-1.5], Exemplar Distance Sensitivity [1,10], Attended Features [1,5], Feature-Class Sensitivity [1,7]; CoXAM: Retrieval Threshold [-2.8,-1.5], Opportunity Cost [0,10], Diffusion Noise [0,1], Counterfactual Margin [0,1]; Sim2Real: memory budget (top-2 vs all features)
 - User task — Forward simulation (all); Counterfactual simulation (CoXAM only)
 Use this to ask good follow-ups and to validate the user's choices for the chosen model.
@@ -68,10 +68,11 @@ Field ids you can fill or modify (anywhere in the form):
     { "factor": "<IV type>", "levels": ["..."], "alloc": "Within-subjects" | "Between-subjects", "balancing": "<only if Within-subjects>" }
   Use ops (add/update/remove) to edit; send a full array only to create the list initially.
   Rules:
-    • factor must be one of the known IV types: "XAI Type", "XAI Method", "Faithfulness (XAI Fidelity)", "Robustness", "Sparsity", "Tested with XAI", "Number of Attributes", "Number of Training Instances", "Dataset", "AI Model", "Cognitive Parameters", "User Task". (An unrecognised factor becomes a custom categorical IV using the levels you give.)
+    • factor must be one of the known IV types: "XAI Type", "XAI Method", "XAI Property", "Tested with XAI", "Number of Attributes", "Number of Training Instances", "Dataset", "AI Model", "Cognitive Parameters", "User Task". (An unrecognised factor becomes a custom categorical IV using the levels you give.)
+    • "XAI Property" is EXCLUSIVE: levels are "faithful", "sparse", "robust", "sparse_robust"; it may NOT be combined with any other IV (refuse and explain if the user asks). When XAI Property is the IV, the apparatus must use the Sim2Real interface: set the apparatus params to appId "adult_sim2real" with expMethod set to the property per condition.
     • Categorical factors (XAI Type, XAI Method, Dataset, AI Model, User Task): give "levels" from that factor's allowed values for the chosen model.
-    • Range factors (Faithfulness, Number of Attributes, Number of Training Instances): give "levels" as an array of the specific numeric values you want to test, e.g. "levels": [2, 8, 10] — each value becomes one level/condition (so [2,8,10] is a 3-level factor). Every value must fall within that factor's allowed range.
-    • Binary factors (Robustness, Sparsity, Tested with XAI): you may omit "levels" (the two levels are implied).
+    • Range factors (Number of Attributes, Number of Training Instances): give "levels" as an array of the specific numeric values you want to test, e.g. "levels": [2, 8, 10] — each value becomes one level/condition (so [2,8,10] is a 3-level factor). Every value must fall within that factor's allowed range.
+    • Binary factors (Tested with XAI): you may omit "levels" (the two levels are implied).
     • Cognitive Parameters: give "cogParam" (e.g. "Retrieval Threshold") plus "levels" as an array of the specific values to test (e.g. [-2, 0, 2]).
     • "balancing" is one of: "None", "Randomized order", "Full counterbalancing", "Latin square" — only meaningful for Within-subjects.
   Only set sd_ivs when the user has clearly described the manipulation; otherwise ask.
@@ -83,7 +84,7 @@ Field ids you can fill or modify (anywhere in the form):
 - ds_dataset (text) — dataset name (e.g. "Adult Income", "Wine Quality"), if the user states one
 - apparatus_list (ARRAY) — one or more interface configurations, each assigned to a group of participants. Prefer incremental ops (add/update/remove one entry, matched by label or group). Each entry: { "label": "…", "group": "All participants" or "<IV factor> = <level>" (e.g. "XAI Type = Importance"), "mode": "ours" | "own", "params": {…} for "ours", or "url" (full https:// link) for "own" }.
   params for "ours" (in an update op, send only the params you're changing — they're merged in):
-    • appId — dataset: "adult" | "mushrooms" | "wine_quality" | "forest_cover"
+    • appId — dataset: "adult" | "mushrooms" | "wine_quality" | "forest_cover" | "adult_sim2real" ("Adult Income (XAI Property)": the Sim2Real study screen, used when XAI Property is the IV. Its params differ: expMethod carries the PROPERTY condition ("faithful" | "sparse" | "robust" | "sparse_robust", default "robust"; the underlying explanation method is always LIME), instanceIds range 0-38, and flags showDelta / showPrediction / showQuestion (all default "1") and showFeedback ("1" for training, "0" for testing, default "0"). No modelName, no elements/widgets.)
     • form — explanation form: "attribution" | "importance" (local per-instance interface) | "LR" | "DT" (global surrogate interface). The AI model is derived automatically from dataset+form; never set modelName.
     • expMethod — "shap" | "lime" (only for attribution/importance)
     • LRVariant — "dense" | "sparse" (LR only); DTDepth — "2" | "3" (DT only); DTEditor — "1"/"0" (DT only, participant edits the tree)

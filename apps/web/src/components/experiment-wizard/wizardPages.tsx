@@ -12,8 +12,9 @@ import {
   parseApparatusList, ApparatusEntry, normalizeApparatusEntry, ivGroupOptions,
   instanceIdsOf,
   STUDY_UI_ROOT, STUDY_PARAM_DEFAULTS, buildStudyUrl,
-  STUDY_DATASETS, EXPLANATION_FORMS, INTERFACE_ELEMENTS,
-  formOf, namespaceOf, elementsOf, instanceRangeFor, studyNaturalSize,
+  STUDY_DATASETS, EXPLANATION_FORMS, INTERFACE_ELEMENTS, EXPLANATION_PROPERTIES,
+  formOf, namespaceOf, elementsOf, instanceRangeFor, studyNaturalSize, hasXaiPropertyIv,
+  sim2realPropertyOf,
 } from "./questions";
 
 // Re-exported for backward compatibility with existing imports of these from this module.
@@ -128,8 +129,11 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
   function saveList(next: ApparatusEntry[]) { setAnswer("apparatus_list", JSON.stringify(next)); }
   function patchEntry(id: string, patch: Partial<ApparatusEntry>) { saveList(entries.map((e) => (e.id === id ? { ...e, ...patch } : e))); }
   function setParam(e: ApparatusEntry, k: string, v: string) { patchEntry(e.id, { params: { ...e.params, [k]: v } }); }
+  // XAI Property designs run on the Sim2Real interface — seed new configs accordingly.
+  const hasXP = hasXaiPropertyIv(a);
   function addEntry() {
-    const e = normalizeApparatusEntry({ label: `Configuration ${entries.length + 1}`, group: "All participants", mode: "ours", params: {}, url: "" });
+    const seedParams = hasXP ? { appId: "adult_sim2real" } : {};
+    const e = normalizeApparatusEntry({ label: `Configuration ${entries.length + 1}`, group: "All participants", mode: "ours", params: seedParams, url: "" });
     saveList([...entries, e]);
     setEditingId(e.id);
   }
@@ -148,10 +152,12 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
   function summaryFor(e: ApparatusEntry): string {
     if (e.mode === "own") return e.url.trim() ? `Your interface · ${e.url.trim()}` : "Your interface · no URL yet";
     const p = entryParams(e);
-    const formLabel = EXPLANATION_FORMS.find((f) => f.id === formOf(p))?.label ?? formOf(p);
     const ds = STUDY_DATASETS.find((d) => d.appId === (p.appId || "wine_quality"))?.label ?? p.appId;
     const n = instanceIdsOf(p).length || 1;
-    return `Our interface · ${formLabel}, ${ds} · ${n} trial${n === 1 ? "" : "s"}`;
+    const what = namespaceOf(p) === "sim2real"
+      ? `XAI Property: ${sim2realPropertyOf(p)}`
+      : EXPLANATION_FORMS.find((f) => f.id === formOf(p))?.label ?? formOf(p);
+    return `Our interface · ${what}, ${ds} · ${n} trial${n === 1 ? "" : "s"}`;
   }
 
   return (
@@ -197,6 +203,7 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                     const p = entryParams(e);
                     const form = formOf(p);
                     const ns = namespaceOf(p);
+                    const sim2real = ns === "sim2real";
                     const els = elementsOf(p);
                     const range = instanceRangeFor(p);
                     const ids = instanceIdsOf(p);
@@ -217,7 +224,18 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                     );
                     return (
                       <div className="space-y-4">
-                        {/* Choose interface elements */}
+                        {hasXP && !sim2real ? (
+                          <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                            Your Study Design manipulates <strong>XAI Property</strong> — pick the <strong>Adult Income (XAI Property)</strong> dataset below to use the Sim2Real interface.
+                          </p>
+                        ) : null}
+                        {!hasXP && sim2real ? (
+                          <p className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+                            This dataset uses the <strong>Sim2Real (XAI Property)</strong> interface — it's meant for designs where XAI Property is the independent variable.
+                          </p>
+                        ) : null}
+                        {/* Choose interface elements — not applicable to the Sim2Real study screen (no widget system) */}
+                        {!sim2real ? (
                         <div>
                           <div className="flex items-start justify-between gap-3">
                             <div>
@@ -264,6 +282,7 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                           </div>
                           {ns === "global" ? <p className="mt-1 text-xs text-neutral-400">Greyed-out elements aren't supported by the surrogate (LR / decision-tree) interface.</p> : null}
                         </div>
+                        ) : null}
 
                         {/* Material configuration */}
                         <div>
@@ -275,12 +294,26 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                                 {STUDY_DATASETS.map((d) => (<option key={d.appId} value={d.appId}>{d.label}</option>))}
                               </select>
                             </ParamField>
-                            <ParamField label="Explanation form">
-                              <select value={form} onChange={(ev) => setParam(e, "form", ev.target.value)} className={pcls}>
-                                {EXPLANATION_FORMS.map((f) => (<option key={f.id} value={f.id}>{f.label}</option>))}
-                              </select>
-                            </ParamField>
-                            {ns === "local" ? (
+                            {!sim2real ? (
+                              <ParamField label="Explanation form">
+                                <select value={form} onChange={(ev) => setParam(e, "form", ev.target.value)} className={pcls}>
+                                  {EXPLANATION_FORMS.map((f) => (<option key={f.id} value={f.id}>{f.label}</option>))}
+                                </select>
+                              </ParamField>
+                            ) : null}
+                            {sim2real ? (
+                              <>
+                                {/* Sim2Real only supports LIME; the URL's expMethod param carries the property condition. */}
+                                <ParamField label="Explanation method">
+                                  <div className={cn(pcls, "bg-neutral-50 text-neutral-500")} title="Sim2Real supports LIME only">LIME</div>
+                                </ParamField>
+                                <ParamField label="Explanation property">
+                                  <select value={sim2realPropertyOf(p)} onChange={(ev) => setParam(e, "expMethod", ev.target.value)} className={pcls}>
+                                    {EXPLANATION_PROPERTIES.map((x) => (<option key={x} value={x}>{x}</option>))}
+                                  </select>
+                                </ParamField>
+                              </>
+                            ) : ns === "local" ? (
                               <ParamField label="Explanation method">
                                 <select value={p.expMethod === "lime" ? "lime" : "shap"} onChange={(ev) => setParam(e, "expMethod", ev.target.value)} className={pcls}>
                                   <option value="shap">SHAP</option>
@@ -332,6 +365,10 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                           ) : null}
 
                           <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2">
+                            {sim2real ? flagCheck("Show change to consider (delta)", p.showDelta !== "0", () => setParam(e, "showDelta", p.showDelta === "0" ? "1" : "0")) : null}
+                            {sim2real ? flagCheck("Show AI prediction", p.showPrediction !== "0", () => setParam(e, "showPrediction", p.showPrediction === "0" ? "1" : "0")) : null}
+                            {sim2real ? flagCheck("Show question", p.showQuestion !== "0", () => setParam(e, "showQuestion", p.showQuestion === "0" ? "1" : "0")) : null}
+                            {sim2real ? flagCheck("Show feedback (training mode)", p.showFeedback === "1", () => setParam(e, "showFeedback", p.showFeedback === "1" ? "0" : "1")) : null}
                             {ns === "local" ? flagCheck("Focus the participant on important features", p.focusOnImportant === "1", () => setParam(e, "focusOnImportant", p.focusOnImportant === "1" ? "0" : "1")) : null}
                             {ns === "global" && form === "DT" ? flagCheck("Participant edits the tree", p.DTEditor === "1", () => setParam(e, "DTEditor", p.DTEditor === "1" ? "0" : "1")) : null}
                             {ns === "global" ? flagCheck("Show the explanation's prediction", p.showExplanationPrediction !== "0", () => setParam(e, "showExplanationPrediction", p.showExplanationPrediction === "0" ? "1" : "0")) : null}
