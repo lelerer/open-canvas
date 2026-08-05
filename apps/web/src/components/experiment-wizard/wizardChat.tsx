@@ -73,41 +73,52 @@ export interface OpTargetCfg {
   merge?: (existing: any, patch: any) => any; // custom update merge (default: shallow spread)
 }
 
+// Separator-tolerant substring match for op targeting: "sparse robust", "sparse_robust"
+// and "Sparse+Robust" all find the same item. A near-miss match would otherwise make
+// the op a silent no-op.
+export function fuzzyHas(hay: string, needle: string): boolean {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const h = norm(hay);
+  const n = norm(needle);
+  if (!n) return false;
+  return h.includes(n) || h.replace(/ /g, "").includes(n.replace(/ /g, ""));
+}
+
 export const OP_CFG: Record<string, OpTargetCfg> = {
   sd_dv: {
     parse: (a) => parseDvs(a.sd_dv),
     write: (a, list) => ({ ...a, sd_dv: JSON.stringify(normalizeDvSpecs(list)) }),
-    match: (it, q) => dvDisplayName(it).toLowerCase().includes(q),
+    match: (it, q) => fuzzyHas(dvDisplayName(it), q),
     build: (v) => normalizeDvSpecs([v])[0] ?? null,
   },
   sd_cv: {
     parse: (a) => parseVars(a.sd_cv),
     write: (a, list) => ({ ...a, sd_cv: JSON.stringify(normalizeVarSpecs(list)) }),
-    match: (it, q) => String(it.name || "").toLowerCase().includes(q),
+    match: (it, q) => fuzzyHas(String(it.name || ""), q),
     build: (v) => normalizeVarSpecs([v])[0] ?? null,
   },
   sd_rv: {
     parse: (a) => parseVars(a.sd_rv),
     write: (a, list) => ({ ...a, sd_rv: JSON.stringify(normalizeVarSpecs(list)) }),
-    match: (it, q) => String(it.name || "").toLowerCase().includes(q),
+    match: (it, q) => fuzzyHas(String(it.name || ""), q),
     build: (v) => normalizeVarSpecs([v])[0] ?? null,
   },
   proc_steps: {
     parse: (a) => parseProcSteps(a.proc_steps),
     write: (a, list) => ({ ...a, proc_steps: JSON.stringify(normalizeProcSpecs(list)) }),
-    match: (it, q) => String(it.title || "").toLowerCase().includes(q),
+    match: (it, q) => fuzzyHas(String(it.title || ""), q),
     build: (v) => normalizeProcSpecs([v])[0] ?? null,
   },
   sd_ivs: {
     parse: (a) => parseIvs(a),
     write: (a, list) => ({ ...a, sd_ivs: JSON.stringify(list), sd_conditions: String(totalCells(list as IvEntry[])) }),
-    match: (it, q) => (String(it.label || "") + " " + String(it.factor || "")).toLowerCase().includes(q),
+    match: (it, q) => fuzzyHas(String(it.label || "") + " " + String(it.factor || ""), q),
     build: (v, a) => normalizeIvSpecs([v], ivAgentOf(a))[0] ?? null,
   },
   apparatus_list: {
     parse: (a) => parseApparatusList(a),
     write: (a, list) => ({ ...a, apparatus_list: JSON.stringify(list) }),
-    match: (it, q) => (String(it.label || "") + " " + String(it.group || "")).toLowerCase().includes(q),
+    match: (it, q) => fuzzyHas(String(it.label || "") + " " + String(it.group || ""), q),
     build: (v) => normalizeApparatusEntry(v),
     // Deep-merge params so an update like {params:{form:"DT"}} tweaks one setting
     // instead of wiping the entry's other params (instanceIds, elements, …).
@@ -183,7 +194,7 @@ export const PAGE_CHAT: Record<string, { focus: string; fields: string[] }> = {
     fields: ["sd_dv", "sd_ivs", "sd_cv", "sd_rv", "sd_iv_agent", "ds_dataset", "sd_participants", "sd_trials"],
   },
   apparatus: {
-    focus: "the apparatus configurations. Each entry in apparatus_list is one interface setup assigned to a group of participants (by IV level, e.g. \"XAI Type = Importance\") or to \"All participants\". Use ops to add/update/remove entries. Each entry: { label, group, mode (\"ours\"|\"own\"), params for ours, or url for own }. params: { appId (adult|mushrooms|wine_quality|forest_cover|adult_sim2real — adult_sim2real is the Sim2Real study screen for XAI-Property designs; its params differ: expMethod carries the PROPERTY (faithful|sparse|robust|sparse_robust, default robust; the underlying method is always LIME), instanceIds 0-38, flags showDelta/showPrediction/showQuestion (default 1) and showFeedback (1 for training, default 0); no modelName or elements), form (attribution|importance|LR|DT — LR and DT use the global surrogate interface, the others the local one; the AI model is derived automatically), expMethod (shap|lime, local forms only), LRVariant (dense|sparse, LR only), DTDepth (2|3, DT only), DTEditor (1|0, DT only), instanceIds (comma/range list of trial instance IDs, e.g. \"0, 3, 7\" or \"0-9\" — local ranges: mushrooms 0-3938, wine_quality 0-121, adult/forest_cover 0-299; global always 0-399), elements (comma list of interface elements: instance,meters,xai,prediction,feedback,ground-truth,tutorial,sliders — instance/meters/feedback/ground-truth are local-only), focusOnImportant (1|0, local), userPrediction (none|0|1, local), showExplanationPrediction (1|0, global), recourseConfirm (1|0, global with sliders) }. When the design's IV is XAI Property, every apparatus entry must use appId adult_sim2real — one entry per property level for between-subjects designs. Ask which interface they want, which instance IDs to show, and which group each applies to.",
+    focus: "the apparatus configurations. Each entry in apparatus_list is one interface setup assigned to a group of participants (by IV level, e.g. \"XAI Type = Importance\") or to \"All participants\". Use ops to add/update/remove entries. Each entry: { label, group, mode (\"ours\"|\"own\"), params for ours, or url for own }. params: { appId (adult|mushrooms|wine_quality|forest_cover|adult_sim2real — adult_sim2real is the Sim2Real study screen for XAI-Property designs; its params differ: expMethod carries the PROPERTY (faithful|sparse|robust|sparse_robust, default robust; the underlying method is always LIME), instanceIds 0-38, flags showDelta/showPrediction/showQuestion (default 1) and showFeedback (1 for training, default 0); no modelName or elements), form (attribution|importance|LR|DT — LR and DT use the global surrogate interface, the others the local one; the AI model is derived automatically), expMethod (shap|lime, local forms only), LRVariant (dense|sparse, LR only), DTDepth (2|3, DT only), DTEditor (1|0, DT only), instanceIds (the main TEST instances, comma/range list, e.g. \"0, 3, 7\" or \"0-9\" — local ranges: mushrooms 0-3938, wine_quality 0-121, adult/forest_cover 0-299; global always 0-399; adult_sim2real 0-38), trainingInstanceIds (optional PRACTICE instances, same format/range — shown first WITH feedback: sim2real showFeedback=1, attribution/importance add feedback+ground-truth widgets; not supported for LR/DT), elements (comma list of interface elements: instance,meters,xai,prediction,feedback,ground-truth,tutorial,sliders — instance/meters/feedback/ground-truth are local-only), focusOnImportant (1|0, local), userPrediction (none|0|1, local), showExplanationPrediction (1|0, global), recourseConfirm (1|0, global with sliders) }. When the design's IV is XAI Property, every apparatus entry must use appId adult_sim2real — one entry per property level for between-subjects designs. Ask which interface they want, which instance IDs to show, and which group each applies to.",
     fields: ["apparatus_list"],
   },
   procedure: {

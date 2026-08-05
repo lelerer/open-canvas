@@ -10,7 +10,7 @@ import {
   Page, Answers, parseIvs, parseProcSteps, ProcStep, PROC_STEP_TYPES,
   USER_MODELS, UserModel, parseIdList, cognitiveParamsFor, CognitiveParam,
   parseApparatusList, ApparatusEntry, normalizeApparatusEntry, ivGroupOptions,
-  instanceIdsOf,
+  instanceIdsOf, trainingInstanceIdsOf,
   STUDY_UI_ROOT, STUDY_PARAM_DEFAULTS, buildStudyUrl,
   STUDY_DATASETS, EXPLANATION_FORMS, INTERFACE_ELEMENTS, EXPLANATION_PROPERTIES,
   formOf, namespaceOf, elementsOf, instanceRangeFor, studyNaturalSize, hasXaiPropertyIv,
@@ -154,10 +154,11 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
     const p = entryParams(e);
     const ds = STUDY_DATASETS.find((d) => d.appId === (p.appId || "wine_quality"))?.label ?? p.appId;
     const n = instanceIdsOf(p).length || 1;
+    const nTrain = trainingInstanceIdsOf(p).length;
     const what = namespaceOf(p) === "sim2real"
       ? `XAI Property: ${sim2realPropertyOf(p)}`
       : EXPLANATION_FORMS.find((f) => f.id === formOf(p))?.label ?? formOf(p);
-    return `Our interface · ${what}, ${ds} · ${n} trial${n === 1 ? "" : "s"}`;
+    return `Our interface · ${what}, ${ds} · ${nTrain ? `${nTrain} practice + ` : ""}${n} trial${n === 1 ? "" : "s"}`;
   }
 
   return (
@@ -207,7 +208,9 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                     const els = elementsOf(p);
                     const range = instanceRangeFor(p);
                     const ids = instanceIdsOf(p);
-                    const badIds = ids.filter((id) => { const n = Number(id); return !Number.isInteger(n) || n < range.min || n > range.max; });
+                    const trainIds = trainingInstanceIdsOf(p);
+                    const outOfRange = (id: string) => { const n = Number(id); return !Number.isInteger(n) || n < range.min || n > range.max; };
+                    const badIds = [...trainIds, ...ids].filter(outOfRange);
                     const dsLabel = STUDY_DATASETS.find((d) => d.appId === (p.appId || "wine_quality"))?.label ?? p.appId;
                     const available = (el: { key: string; localOnly?: boolean }) => !(ns === "global" && el.localOnly);
                     const toggleElement = (k: string) => {
@@ -335,7 +338,18 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                                 </select>
                               </ParamField>
                             )}
-                            <ParamField label={`Data instances (trials) · ${range.min}–${range.max}`}>
+                            {ns !== "global" ? (
+                              <ParamField label="Training instances · feedback shown">
+                                <input
+                                  type="text"
+                                  value={p.trainingInstanceIds ?? ""}
+                                  onChange={(ev) => setParam(e, "trainingInstanceIds", ev.target.value)}
+                                  placeholder="optional — e.g. 0-2"
+                                  className={pcls}
+                                />
+                              </ParamField>
+                            ) : null}
+                            <ParamField label={`Test instances (trials) · ${range.min}–${range.max}`}>
                               <input
                                 type="text"
                                 value={p.instanceIds ?? ids.join(", ")}
@@ -356,9 +370,12 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                           </div>
 
                           {ids.length ? (
-                            <p className="mt-2 text-xs text-neutral-400">Generates <span className="font-medium text-neutral-600">{ids.length}</span> trial{ids.length === 1 ? "" : "s"} for this group — instances {ids.join(", ")}. Each participant sees one instance per trial.</p>
+                            <p className="mt-2 text-xs text-neutral-400">
+                              {trainIds.length ? <>Generates <span className="font-medium text-neutral-600">{trainIds.length}</span> practice trial{trainIds.length === 1 ? "" : "s"} <span className="text-neutral-500">(feedback shown, instances {trainIds.join(", ")})</span> followed by </> : <>Generates </>}
+                              <span className="font-medium text-neutral-600">{ids.length}</span> test trial{ids.length === 1 ? "" : "s"} — instances {ids.join(", ")}. Each participant sees one instance per trial.
+                            </p>
                           ) : (
-                            <p className="mt-2 text-xs text-amber-600">Enter at least one instance ID (e.g. <code>0, 3, 7</code> or a range <code>0-9</code>) — this defines the trials in the generated survey.</p>
+                            <p className="mt-2 text-xs text-amber-600">Enter at least one test instance ID (e.g. <code>0, 3, 7</code> or a range <code>0-9</code>) — this defines the trials in the generated survey.</p>
                           )}
                           {badIds.length ? (
                             <p className="mt-1 text-xs font-medium text-red-600">Out of range for {dsLabel} (the {ns} interface allows {range.min}–{range.max}): {badIds.join(", ")}. The two interfaces index different corpora — re-check IDs after changing the explanation form.</p>
@@ -368,7 +385,6 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                             {sim2real ? flagCheck("Show change to consider (delta)", p.showDelta !== "0", () => setParam(e, "showDelta", p.showDelta === "0" ? "1" : "0")) : null}
                             {sim2real ? flagCheck("Show AI prediction", p.showPrediction !== "0", () => setParam(e, "showPrediction", p.showPrediction === "0" ? "1" : "0")) : null}
                             {sim2real ? flagCheck("Show question", p.showQuestion !== "0", () => setParam(e, "showQuestion", p.showQuestion === "0" ? "1" : "0")) : null}
-                            {sim2real ? flagCheck("Show feedback (training mode)", p.showFeedback === "1", () => setParam(e, "showFeedback", p.showFeedback === "1" ? "0" : "1")) : null}
                             {ns === "local" ? flagCheck("Focus the participant on important features", p.focusOnImportant === "1", () => setParam(e, "focusOnImportant", p.focusOnImportant === "1" ? "0" : "1")) : null}
                             {ns === "global" && form === "DT" ? flagCheck("Participant edits the tree", p.DTEditor === "1", () => setParam(e, "DTEditor", p.DTEditor === "1" ? "0" : "1")) : null}
                             {ns === "global" ? flagCheck("Show the explanation's prediction", p.showExplanationPrediction !== "0", () => setParam(e, "showExplanationPrediction", p.showExplanationPrediction === "0" ? "1" : "0")) : null}
@@ -607,7 +623,7 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
         </span>
         <span className="min-w-0">
           <span className="block text-sm font-medium text-neutral-900">{m.name} <span className="font-normal text-neutral-400">· {m.full}</span></span>
-          <span className="mt-0.5 block text-sm text-neutral-500">{m.description}</span>
+          {m.category !== "Cognitive model" ? <span className="mt-0.5 block text-sm text-neutral-500">{m.description}</span> : null}
         </span>
       </button>
     );

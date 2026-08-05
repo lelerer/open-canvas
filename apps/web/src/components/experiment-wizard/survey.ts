@@ -17,8 +17,8 @@
 //                       participant is shown exactly one apparatus at random.
 
 import {
-  Answers, parseApparatusList, ApparatusEntry, instanceIdsOf,
-  STUDY_UI_ROOT, STUDY_PARAM_DEFAULTS, buildStudyUrl, studyNaturalSize,
+  Answers, parseApparatusList, ApparatusEntry, instanceIdsOf, trainingInstanceIdsOf,
+  STUDY_UI_ROOT, STUDY_PARAM_DEFAULTS, buildStudyUrl, studyNaturalSize, namespaceOf,
 } from "./questions";
 
 /* ----------------------------- Survey model ----------------------------- */
@@ -69,7 +69,8 @@ function isCommonGroup(g: string): boolean {
 }
 
 // The interface URL for a given apparatus configuration + instance id.
-export function studyUrlForInstance(e: ApparatusEntry, id: string): string {
+// training=true renders the trial with feedback visible (see buildStudyUrl).
+export function studyUrlForInstance(e: ApparatusEntry, id: string, training = false): string {
   if (e.mode === "own") {
     const u = (e.url || "").trim();
     if (!u) return "";
@@ -77,7 +78,7 @@ export function studyUrlForInstance(e: ApparatusEntry, id: string): string {
     const sep = u.includes("?") ? "&" : "?";
     return `${u}${sep}instanceId=${encodeURIComponent(id)}`;
   }
-  const p = { ...STUDY_PARAM_DEFAULTS, ...e.params, instanceId: id };
+  const p = { ...STUDY_PARAM_DEFAULTS, ...e.params, instanceId: id, trainingMode: training ? "1" : "0" };
   return buildStudyUrl(STUDY_UI_ROOT, p);
 }
 
@@ -119,35 +120,38 @@ export function buildSurvey(a: Answers): Survey {
   const te = (text: string, meta?: Record<string, string>): SQuestion => ({ ...nextQ(), type: "TE", selector: "SL", text, meta });
   const mc = (text: string, choices: string[], meta?: Record<string, string>): SQuestion => ({ ...nextQ(), type: "MC", selector: "SAVR", subSelector: "TX", text, choices, meta });
 
-  // ---- One block per apparatus configuration; one trial per instance ID ----
+  // ---- One block per apparatus configuration; one trial per instance ID.
+  // Training instances (if any) come FIRST, rendered with feedback visible; the
+  // main test instances follow without feedback.
   function apparatusBlock(e: ApparatusEntry): SBlock {
-    const trialIds = instanceIdsOf({ ...STUDY_PARAM_DEFAULTS, ...e.params });
-    const ids = trialIds.length ? trialIds : ["0"];
+    const p = { ...STUDY_PARAM_DEFAULTS, ...e.params };
+    const trainIds = trainingInstanceIdsOf(p);
+    const mainIds0 = instanceIdsOf(p);
+    const mainIds = mainIds0.length ? mainIds0 : ["0"];
     const label = e.label?.trim() || (isCommonGroup(e.group) ? "Apparatus" : e.group);
     const questions: SQuestion[] = [];
-    const nat = studyNaturalSize(e.mode, { ...STUDY_PARAM_DEFAULTS, ...e.params });
-    ids.forEach((id, i) => {
-      const url = studyUrlForInstance(e, id);
-      // The embed renders at the interface's natural size and is scaled to fit the
-      // question column by the per-question JS (IFRAME_FIT_JS) so nothing is clipped.
-      const iframe = url
+    const nat = studyNaturalSize(e.mode, p);
+    // The Sim2Real study screen collects the participant's answer itself (the
+    // higher/lower question inside the iframe), so no separate prediction question.
+    const sim2real = e.mode === "ours" && namespaceOf(p) === "sim2real";
+    const embed = (url: string) =>
+      url
         ? `<div style="width:100%;overflow:hidden;"><iframe src="${esc(url)}" data-natural-width="${nat.w}" data-natural-height="${nat.h}" style="width:100%;height:700px;border:1px solid #ccc;" allow="fullscreen"></iframe></div>`
         : `<em>(no interface URL configured)</em>`;
-      questions.push(
-        db(
-          `<div><strong>Trial ${i + 1} of ${ids.length}</strong> — instance ${esc(id)}</div>` +
-            `<p>Study the interface below, then answer the questions that follow.</p>` +
-            iframe,
-          { instanceId: id, apparatus: e.label || label, url }
-        )
-      );
-      questions.push(
-        te(`Based on the interface above, what do you predict the AI's output is for this item?`, { instanceId: id, kind: "prediction" })
-      );
-      questions.push(
-        mc(`How confident are you in your prediction?`, CONFIDENCE_CHOICES, { instanceId: id, kind: "confidence" })
-      );
-    });
+    const pushTrial = (id: string, i: number, n: number, training: boolean) => {
+      const url = studyUrlForInstance(e, id, training);
+      const phase = training ? "training" : "main";
+      const heading = training
+        ? `<div><strong>Practice trial ${i + 1} of ${n}</strong> — instance ${esc(id)}</div><p>This is a practice round: you will see feedback after answering. Study the interface below, then answer the questions.</p>`
+        : `<div><strong>Trial ${i + 1} of ${n}</strong> — instance ${esc(id)}</div><p>Study the interface below, then answer the questions that follow.</p>`;
+      questions.push(db(heading + embed(url), { instanceId: id, apparatus: e.label || label, url, phase }));
+      if (!sim2real) {
+        questions.push(te(`Based on the interface above, what do you predict the AI's output is for this item?`, { instanceId: id, kind: "prediction", phase }));
+      }
+      questions.push(mc(sim2real ? `How confident are you in your answer?` : `How confident are you in your prediction?`, CONFIDENCE_CHOICES, { instanceId: id, kind: "confidence", phase }));
+    };
+    trainIds.forEach((id, i) => pushTrial(id, i, trainIds.length, true));
+    mainIds.forEach((id, i) => pushTrial(id, i, mainIds.length, false));
     return mkBlock(`Apparatus — ${label}`, questions);
   }
 

@@ -55,6 +55,7 @@ Put an "ops" array inside the APPLY block. Each op edits ONE item of one list:
 - add: appends one item. "value" is a single item object (same shape as one element of that list, see field specs below).
 - update: changes one existing item. Identify it with "match" (case-insensitive substring of its name/title/label) OR "index" (1-based). "value" holds only the fields to change (they're merged in).
 - remove: deletes the item identified by "match" or "index".
+- IMPORTANT: an op whose "match" finds nothing is silently dropped — the user's data does NOT change. For apparatus_list, match against the EXACT group value (e.g. "XAI Property = sparse_robust") or use "index"; when updating every entry in a list, prefer one op per entry by index (1, 2, 3, …).
 Examples:
   Add a DV:        {"ops":[{"target":"sd_dv","op":"add","value":{"measure":"Trust"}}]}
   Edit IV levels:  {"ops":[{"target":"sd_ivs","op":"update","match":"XAI Method","value":{"levels":["LIME","SHAP","Integrated Gradients"]}}]}
@@ -88,7 +89,8 @@ Field ids you can fill or modify (anywhere in the form):
     • form — explanation form: "attribution" | "importance" (local per-instance interface) | "LR" | "DT" (global surrogate interface). The AI model is derived automatically from dataset+form; never set modelName.
     • expMethod — "shap" | "lime" (only for attribution/importance)
     • LRVariant — "dense" | "sparse" (LR only); DTDepth — "2" | "3" (DT only); DTEditor — "1"/"0" (DT only, participant edits the tree)
-    • instanceIds — the trial instances, comma/range list as a string, e.g. "0, 3, 7" or "0-9". Each id becomes one trial. Valid ranges — attribution/importance: mushrooms 0-3938, wine_quality 0-121, adult and forest_cover 0-299; LR/DT: always 0-399.
+    • instanceIds — the MAIN TEST instances, comma/range list as a string, e.g. "0, 3, 7" or "0-9". Each id becomes one trial (no feedback shown). Valid ranges — attribution/importance: mushrooms 0-3938, wine_quality 0-121, adult and forest_cover 0-299; LR/DT: always 0-399; adult_sim2real 0-38.
+    • trainingInstanceIds — OPTIONAL practice instances (same comma/range format, same valid range). These come FIRST in the generated survey and are shown WITH feedback so participants can learn: sim2real sets showFeedback=1, attribution/importance additionally show the feedback and ground-truth widgets. Not supported for LR/DT (that renderer has no feedback display). When the user distinguishes training vs testing trials, put the training ids here and the testing ids in instanceIds.
     • elements — comma list of interface elements shown to the participant: "instance", "meters", "xai", "prediction", "feedback", "ground-truth", "tutorial", "sliders". "instance" (the data instance) is ALWAYS shown and cannot be removed — it is added automatically even if omitted. instance/meters/feedback/ground-truth exist only for attribution/importance forms. Unselecting "xai" hides the explanation.
     • focusOnImportant ("1"/"0") and userPrediction ("none"/"0"/"1") — attribution/importance only
     • showExplanationPrediction ("1"/"0") and recourseConfirm ("1"/"0", needs "sliders" in elements) — LR/DT only

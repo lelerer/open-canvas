@@ -62,8 +62,8 @@ export function parseIdList(raw: string | undefined): string[] {
 }
 
 export const USER_MODELS: UserModel[] = [
-  { id: "CoAX", name: "CoAX", full: "CoAX — full name TBC", description: "Cognitive user model (please add a 1–2 line description).", category: "Cognitive model" },
-  { id: "CoXAM", name: "CoXAM", full: "CoXAM — full name TBC", description: "Cognitive user model (please add a 1–2 line description).", category: "Cognitive model" },
+  { id: "CoAX", name: "CoAX", full: "Interpreting Attribution XAI", description: "A cognitive user model of how people interpret attribution-based explanations (e.g. LIME / SHAP feature attributions).", category: "Cognitive model" },
+  { id: "CoXAM", name: "CoXAM", full: "Interpreting Global XAI (Rules vs Weights)", description: "A cognitive user model of how people interpret global surrogate explanations — decision-tree rules vs logistic-regression weights.", category: "Cognitive model" },
   // Comparison baselines (simple standard models run alongside for comparison):
   { id: "KNN", name: "KNN", full: "k-Nearest Neighbours", description: "A simple, standard model used as a comparison baseline. Works with both CoAX and CoXAM.", category: "Comparison baseline" },
   { id: "Decision Tree", name: "Decision Tree", full: "Decision tree", description: "A simple, standard model used as a comparison baseline. Works with both CoAX and CoXAM.", category: "Comparison baseline" },
@@ -733,6 +733,13 @@ export function instanceIdsOf(params: Record<string, string>): string[] {
   return legacy.length ? legacy : [];
 }
 
+// Training instances: shown FIRST in the generated survey, with feedback visible
+// (sim2real → showFeedback=1; local → feedback/ground-truth widgets + showGroundTruth=1;
+// the global surrogate renderer has no feedback display, so it has no training list).
+export function trainingInstanceIdsOf(params: Record<string, string>): string[] {
+  return parseInstanceIds(params.trainingInstanceIds);
+}
+
 // ---- Study-interface URL (the deployed XAI iframe apps) ----
 // Pure helpers, kept here (not in the client component) so survey/QSF generation
 // can build interface URLs without importing React modules.
@@ -855,6 +862,9 @@ export function buildStudyUrl(root: string, p: Record<string, string>): string {
   // "XAI visualization" unchecked → xaiType=none. No elements selected at all
   // means "show everything" (the host's default when widgets is omitted).
   const xaiOn = has("xai") || els.length === 0;
+  // trainingMode="1" marks a TRAINING trial: feedback is shown so participants can
+  // learn from it. Set per-URL by the survey generator, never stored on the config.
+  const training = p.trainingMode === "1";
   if (ns === "sim2real") {
     // Sim2Real (XAI Property) study screen. expMethod carries the PROPERTY condition
     // (not shap/lime); there is no modelName and no widgets. All flags emitted bare 1/0.
@@ -865,7 +875,10 @@ export function buildStudyUrl(root: string, p: Record<string, string>): string {
     q2.set("showDelta", p.showDelta === "0" ? "0" : "1");
     q2.set("showPrediction", p.showPrediction === "0" ? "0" : "1");
     q2.set("showQuestion", p.showQuestion === "0" ? "0" : "1");
-    q2.set("showFeedback", p.showFeedback === "1" ? "1" : "0");
+    // Feedback is driven ONLY by the training/test split: training trials show it,
+    // test trials never do. (A legacy stored showFeedback param is deliberately
+    // ignored — it used to leak feedback into test trials.)
+    q2.set("showFeedback", training ? "1" : "0");
     return `${root}/local/sim2real/study.html?${q2.toString()}`;
   }
   const q = new URLSearchParams();
@@ -874,14 +887,16 @@ export function buildStudyUrl(root: string, p: Record<string, string>): string {
   q.set("modelName", modelNameFor(p));
   // Flags are always emitted as bare 1/0 — the two renderers parse them differently.
   if (ns === "local") {
+    // Training trials additionally show the feedback + ground-truth widgets.
+    const localEls = training ? Array.from(new Set([...els, "feedback", "ground-truth"])) : els;
     q.set("expMethod", p.expMethod === "lime" ? "lime" : "shap");
     q.set("xaiType", xaiOn ? form : "none");
-    if (els.length) q.set("widgets", els.map((k) => (k === "sliders" ? "simulation" : k)).join(","));
+    if (localEls.length) q.set("widgets", localEls.map((k) => (k === "sliders" ? "simulation" : k)).join(","));
     q.set("showPrediction", has("prediction") ? "1" : "0");
     q.set("showTutorial", has("tutorial") ? "1" : "0");
     q.set("userSimulation", has("sliders") ? "1" : "0");
     q.set("userPrediction", p.userPrediction || "none");
-    q.set("showGroundTruth", has("ground-truth") ? "1" : "0");
+    q.set("showGroundTruth", training || has("ground-truth") ? "1" : "0");
     q.set("focusOnImportant", p.focusOnImportant === "1" ? "1" : "0");
   } else {
     q.set("xaiType", xaiOn ? form : "none");
