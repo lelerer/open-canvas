@@ -118,9 +118,10 @@ export const IV_CATALOG: IvFactor[] = [
     group: "Explanation (XAI)",
     def: "The category/family of explanation shown to the user.",
     agents: ["CoAX", "CoXAM"],
+    // CoAX supports only the local family; CoXAM supports all six.
     levelsByAgent: {
       CoAX: ["None", "Attribution", "Importance"],
-      CoXAM: ["Decision Tree", "Logistic Regression", "Hybrid"],
+      CoXAM: ["None", "Attribution", "Importance", "Decision Tree", "Logistic Regression", "Hybrid"],
     },
   },
   {
@@ -342,6 +343,18 @@ export function totalCells(ivs: IvEntry[]): number {
 // Sim2Real interface and no other IV may be combined with it.
 export function hasXaiPropertyIv(a: Answers): boolean {
   return parseIvs(a).some((e) => e.factor === "xai_property");
+}
+
+// CoAX and CoXAM support different levels for some IVs (XAI Type, XAI Method,
+// User Task). Returns the selected levels of an IV entry that the given
+// model/framework does NOT support, so the UI can flag the mismatch.
+const AGENT_CHECKED_FACTORS = new Set(["xai_type", "xai_method", "user_task"]);
+export function unsupportedIvLevels(e: IvEntry, agent: string): string[] {
+  if (!AGENT_CHECKED_FACTORS.has(e.factor)) return [];
+  const f = IV_CATALOG.find((x) => x.id === e.factor);
+  if (!f || !f.levelsByAgent) return [];
+  const supported = ivLevelsFor(f, agent).map((s) => s.toLowerCase());
+  return ivLevelList(e).filter((l) => !supported.includes(l.toLowerCase()));
 }
 
 // Participants are split only across the between-subjects cells.

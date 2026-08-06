@@ -7,7 +7,7 @@ import { ACCENT, SERIF, COMMON_VAR_TYPES, InfoTip, DocLabel, DocSelect, TextInpu
 import {
   Answers, IvEntry, IvFactor, IV_CATALOG, IV_GROUP_ORDER, ivFactorsForAgent, ivLevelsFor,
   ALLOC_OPTIONS, BALANCING_METHODS, parseIvs, totalCells, betweenCells, validateParticipants,
-  participantGroups, withinCoverage,
+  participantGroups, withinCoverage, unsupportedIvLevels,
   DATASET_OPTIONS, DV_CATALOG, DV_GROUP_ORDER, DvEntry, parseDvs, Variable, parseVars,
 } from "./questions";
 
@@ -351,12 +351,27 @@ export function IvLevelEditor({ factor, entry, agent, onPatch, answers }: { fact
   const cogParam = cogParams.find((p) => p.name === entry.cogParam) || null;
 
   // Categorical options. For the Dataset factor, offer every built-in dataset so
-  // multiple can be compared — not just the agent's few.
+  // multiple can be compared — not just the agent's few. XAI Type always offers all
+  // six levels in two rows (CoAX family / CoXAM family) — the model may not be
+  // chosen yet; a mismatch warning below flags unsupported picks once it is.
   const isDataset = factor.id === "dataset";
+  const isXaiType = factor.id === "xai_type";
+  const xaiTypeRows = isXaiType && factor.levelsByAgent
+    ? (() => {
+        const r1 = factor.levelsByAgent["CoAX"] ?? [];
+        const r2 = (factor.levelsByAgent["CoXAM"] ?? []).filter((l) => !r1.includes(l));
+        const leftovers = levels.filter((l) => !r1.includes(l) && !r2.includes(l));
+        return leftovers.length ? [r1, r2, leftovers] : [r1, r2];
+      })()
+    : null;
   const categoricalOptions = Array.from(new Set([
     ...(isDataset ? DATASET_OPTIONS : ivLevelsFor(factor, agent)),
     ...levels, // keep any already-selected value visible even if not in the base list
   ]));
+
+  // Flag levels the chosen model/framework doesn't support (only once a model is known).
+  const modelKnown = !!(((answers?.sd_iv_agent || "").trim()) || ((answers?.user_model || "").trim()));
+  const unsupported = modelKnown ? unsupportedIvLevels(entry, agent) : [];
 
   return (
     <div className="mt-2" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
@@ -364,21 +379,29 @@ export function IvLevelEditor({ factor, entry, agent, onPatch, answers }: { fact
 
       {factor.kind === "categorical" ? (
         <>
-          <div className="flex flex-wrap gap-2">
-            {categoricalOptions.map((lvl) => {
-              const on = levels.includes(lvl);
-              return (
-                <button key={lvl} type="button" onClick={() => toggleLevel(lvl)} className={cn("rounded-full border px-3 py-1 text-xs font-medium transition-colors", on ? "border-transparent text-white" : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-100")} style={on ? { backgroundColor: ACCENT } : undefined}>
-                  {lvl}
-                </button>
-              );
-            })}
-          </div>
+          {(xaiTypeRows ?? [categoricalOptions]).map((row, ri) => (
+            <div key={ri} className={cn("flex flex-wrap gap-2", ri > 0 ? "mt-2" : "")}>
+              {row.map((lvl) => {
+                const on = levels.includes(lvl);
+                return (
+                  <button key={lvl} type="button" onClick={() => toggleLevel(lvl)} className={cn("rounded-full border px-3 py-1 text-xs font-medium transition-colors", on ? "border-transparent text-white" : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-100")} style={on ? { backgroundColor: ACCENT } : undefined}>
+                    {lvl}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
           <p className="mt-1.5 text-xs text-neutral-400">
             Tap to select — choose <span className="font-medium text-neutral-500">two or more</span> to compare them as conditions.
             {levels.length ? ` ${levels.length} selected.` : ""}
           </p>
         </>
+      ) : null}
+
+      {unsupported.length ? (
+        <p className="mt-2 text-xs font-medium text-amber-700">
+          {agent} does not support: {unsupported.join(", ")}. Choose levels supported by {agent}, or switch the model on the User Model page.
+        </p>
       ) : null}
 
       {factor.kind === "binary" && factor.binary ? (

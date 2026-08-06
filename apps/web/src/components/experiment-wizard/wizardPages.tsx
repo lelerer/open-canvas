@@ -14,7 +14,7 @@ import {
   STUDY_UI_ROOT, STUDY_PARAM_DEFAULTS, buildStudyUrl,
   STUDY_DATASETS, EXPLANATION_FORMS, INTERFACE_ELEMENTS, EXPLANATION_PROPERTIES,
   formOf, namespaceOf, elementsOf, instanceRangeFor, studyNaturalSize, hasXaiPropertyIv,
-  sim2realPropertyOf,
+  sim2realPropertyOf, unsupportedIvLevels,
 } from "./questions";
 
 // Re-exported for backward compatibility with existing imports of these from this module.
@@ -647,6 +647,19 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
               <Card key={m.id} m={m} multi={false} on={a.user_model === m.id} onClick={() => setAnswer("user_model", m.id)} />
             ))}
           </div>
+          {(() => {
+            // CoAX and CoXAM support different IV levels — flag conflicts with the Study Design.
+            const agentOfModel = a.user_model === "CoXAM" ? "CoXAM" : a.user_model === "Sim2Real" ? "Sim2Real" : a.user_model ? "CoAX" : "";
+            if (!agentOfModel) return null;
+            const conflicts = parseIvs(a)
+              .map((e) => ({ label: e.label || e.factor, bad: unsupportedIvLevels(e, agentOfModel) }))
+              .filter((x) => x.bad.length);
+            return conflicts.length ? (
+              <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                {agentOfModel} does not support {conflicts.map((c) => `${c.label}: ${c.bad.join(", ")}`).join(" · ")} from your Study Design — adjust the IV levels there or pick the other model.
+              </p>
+            ) : null;
+          })()}
         </div>
 
         {cogParams.length ? (

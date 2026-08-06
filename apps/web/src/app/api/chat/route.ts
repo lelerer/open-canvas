@@ -30,7 +30,7 @@ Conversation style:
 - Just ask; let the user supply their own answers. Do NOT pad questions with worked examples or sample answers; give a brief hint only if the user seems unsure or asks. Keep questions open, concise, and warm.
 
 Domain knowledge for the independent variable (levels depend on the model):
-- XAI type — CoAX: None / Attribution / Importance; CoXAM: Decision Tree / Logistic Regression / Hybrid
+- XAI type — CoAX supports ONLY None / Attribution / Importance; CoXAM supports all six: None / Attribution / Importance / Decision Tree / Logistic Regression / Hybrid. Flag a mismatch if the user picks CoAX with Decision Tree / Logistic Regression / Hybrid.
 - XAI method — CoAX: LIME, SHAP, Integrated gradients, Input gradients (paper), LRP, Captum DeepLift; CoXAM: Decision tree, Logistic regression weights (paper), Decision list, Interpretable decision sets
 - Number of attributes (1–10); Number of training instances (1–14; CoAX default 10, test 18)
 - Dataset — Adult Income (CoAX only), Mushroom (CoXAM only), Wine Quality, Forest Cover
