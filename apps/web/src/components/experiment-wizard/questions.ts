@@ -100,6 +100,7 @@ export interface IvFactor {
   group?: string; // semantic grouping for the dropdown
   def?: string; // one-line definition (shown as a tooltip / under the select)
   agents?: string[]; // available only for these models (default: all)
+  unsupportedAgents?: string[]; // models that cannot manipulate this IV at all (shown, but flagged)
   levels?: string[]; // categorical, same across models
   levelsByAgent?: Record<string, string[]>;
   range?: { min: number; max: number };
@@ -131,10 +132,9 @@ export const IV_CATALOG: IvFactor[] = [
     group: "Explanation (XAI)",
     def: "The specific algorithm used to generate the explanation.",
     agents: ["CoAX", "CoXAM"],
-    levelsByAgent: {
-      CoAX: ["LIME", "SHAP", "Integrated Gradients", "Input Gradients (paper)", "Layer-wise Relevance Propagation", "Captum DeepLift"],
-      CoXAM: ["Decision Tree", "Logistic Regression Weights (paper)", "Decision List", "Interpretable Decision Sets"],
-    },
+    // Always the same six methods; the IV itself is only supported by CoAX.
+    levels: ["LIME", "SHAP", "Integrated Gradients", "Input Gradients (paper)", "Layer-wise Relevance Propagation", "Captum DeepLift"],
+    unsupportedAgents: ["CoXAM"],
   },
   {
     id: "xai_property",
@@ -355,6 +355,13 @@ export function unsupportedIvLevels(e: IvEntry, agent: string): string[] {
   if (!f || !f.levelsByAgent) return [];
   const supported = ivLevelsFor(f, agent).map((s) => s.toLowerCase());
   return ivLevelList(e).filter((l) => !supported.includes(l.toLowerCase()));
+}
+
+// Whether the given model cannot manipulate this IV at all (e.g. XAI Method is
+// CoAX-only — CoXAM has no method variants to compare).
+export function ivFactorUnsupportedByAgent(e: IvEntry, agent: string): boolean {
+  const f = IV_CATALOG.find((x) => x.id === e.factor);
+  return !!f?.unsupportedAgents?.includes(agent);
 }
 
 // Participants are split only across the between-subjects cells.

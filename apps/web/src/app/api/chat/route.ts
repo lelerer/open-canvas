@@ -31,7 +31,7 @@ Conversation style:
 
 Domain knowledge for the independent variable (levels depend on the model):
 - XAI type — CoAX supports ONLY None / Attribution / Importance; CoXAM supports all six: None / Attribution / Importance / Decision Tree / Logistic Regression / Hybrid. Flag a mismatch if the user picks CoAX with Decision Tree / Logistic Regression / Hybrid.
-- XAI method — CoAX: LIME, SHAP, Integrated gradients, Input gradients (paper), LRP, Captum DeepLift; CoXAM: Decision tree, Logistic regression weights (paper), Decision list, Interpretable decision sets
+- XAI method — always these six: LIME, SHAP, Integrated Gradients, Input Gradients (paper), Layer-wise Relevance Propagation, Captum DeepLift. This IV is supported by CoAX ONLY — CoXAM cannot manipulate XAI Method at all; flag a mismatch if the user combines them.
 - Number of attributes (1–10); Number of training instances (1–14; CoAX default 10, test 18)
 - Dataset — Adult Income (CoAX only), Mushroom (CoXAM only), Wine Quality, Forest Cover
 - XAI Property — faithful / sparse / robust / sparse_robust (the Sim2Real synthetic-AI study; EXCLUSIVE: cannot be combined with any other IV, and the apparatus must use the "adult_sim2real" dataset); AI model (MLP / XGBoost, usually controlled by dataset); Tested-with-XAI (with vs without, within-subjects)

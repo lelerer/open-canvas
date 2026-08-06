@@ -7,7 +7,7 @@ import { ACCENT, SERIF, COMMON_VAR_TYPES, InfoTip, DocLabel, DocSelect, TextInpu
 import {
   Answers, IvEntry, IvFactor, IV_CATALOG, IV_GROUP_ORDER, ivFactorsForAgent, ivLevelsFor,
   ALLOC_OPTIONS, BALANCING_METHODS, parseIvs, totalCells, betweenCells, validateParticipants,
-  participantGroups, withinCoverage, unsupportedIvLevels,
+  participantGroups, withinCoverage, unsupportedIvLevels, ivFactorUnsupportedByAgent,
   DATASET_OPTIONS, DV_CATALOG, DV_GROUP_ORDER, DvEntry, parseDvs, Variable, parseVars,
 } from "./questions";
 
@@ -369,9 +369,10 @@ export function IvLevelEditor({ factor, entry, agent, onPatch, answers }: { fact
     ...levels, // keep any already-selected value visible even if not in the base list
   ]));
 
-  // Flag levels the chosen model/framework doesn't support (only once a model is known).
+  // Flag mismatches with the chosen model/framework (only once a model is known).
   const modelKnown = !!(((answers?.sd_iv_agent || "").trim()) || ((answers?.user_model || "").trim()));
-  const unsupported = modelKnown ? unsupportedIvLevels(entry, agent) : [];
+  const factorUnsupported = modelKnown && ivFactorUnsupportedByAgent(entry, agent);
+  const unsupported = modelKnown && !factorUnsupported ? unsupportedIvLevels(entry, agent) : [];
 
   return (
     <div className="mt-2" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
@@ -398,7 +399,11 @@ export function IvLevelEditor({ factor, entry, agent, onPatch, answers }: { fact
         </>
       ) : null}
 
-      {unsupported.length ? (
+      {factorUnsupported ? (
+        <p className="mt-2 text-xs font-medium text-amber-700">
+          {agent} does not support the {factor.label} IV — pick a different IV, or switch the model on the User Model page.
+        </p>
+      ) : unsupported.length ? (
         <p className="mt-2 text-xs font-medium text-amber-700">
           {agent} does not support: {unsupported.join(", ")}. Choose levels supported by {agent}, or switch the model on the User Model page.
         </p>

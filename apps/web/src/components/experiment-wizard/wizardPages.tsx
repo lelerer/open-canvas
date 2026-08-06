@@ -14,7 +14,7 @@ import {
   STUDY_UI_ROOT, STUDY_PARAM_DEFAULTS, buildStudyUrl,
   STUDY_DATASETS, EXPLANATION_FORMS, INTERFACE_ELEMENTS, EXPLANATION_PROPERTIES,
   formOf, namespaceOf, elementsOf, instanceRangeFor, studyNaturalSize, hasXaiPropertyIv,
-  sim2realPropertyOf, unsupportedIvLevels,
+  sim2realPropertyOf, unsupportedIvLevels, ivFactorUnsupportedByAgent,
 } from "./questions";
 
 // Re-exported for backward compatibility with existing imports of these from this module.
@@ -652,11 +652,16 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
             const agentOfModel = a.user_model === "CoXAM" ? "CoXAM" : a.user_model === "Sim2Real" ? "Sim2Real" : a.user_model ? "CoAX" : "";
             if (!agentOfModel) return null;
             const conflicts = parseIvs(a)
-              .map((e) => ({ label: e.label || e.factor, bad: unsupportedIvLevels(e, agentOfModel) }))
-              .filter((x) => x.bad.length);
+              .map((e) => {
+                const label = e.label || e.factor;
+                if (ivFactorUnsupportedByAgent(e, agentOfModel)) return `the ${label} IV (not supported at all)`;
+                const bad = unsupportedIvLevels(e, agentOfModel);
+                return bad.length ? `${label}: ${bad.join(", ")}` : "";
+              })
+              .filter(Boolean);
             return conflicts.length ? (
               <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                {agentOfModel} does not support {conflicts.map((c) => `${c.label}: ${c.bad.join(", ")}`).join(" · ")} from your Study Design — adjust the IV levels there or pick the other model.
+                {agentOfModel} does not support {conflicts.join(" · ")} from your Study Design — adjust the IVs there or pick the other model.
               </p>
             ) : null;
           })()}
