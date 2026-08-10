@@ -9,7 +9,7 @@ import {
   parseIvs, parseVars, varsSummary, parseDvs, dvSummary, dvDisplayName,
   parseProcSteps, procStepsSummary,
   normalizeIvSpecs, normalizeDvSpecs, normalizeVarSpecs, normalizeProcSpecs,
-  totalCells, mlProxyNames, cogConfigSummary, IvEntry,
+  totalCells, mlProxyNames, cogConfigSummary, IvEntry, ivAgentFor,
   parseApparatusList, normalizeApparatusEntry,
 } from "./questions";
 
@@ -62,7 +62,7 @@ export function parseUpdates(text: string, allowed: Set<string>): { clean: strin
 }
 
 export function ivAgentOf(a: Answers): string {
-  return a.sd_iv_agent || (a.user_model === "CoXAM" ? "CoXAM" : a.user_model === "Sim2Real" ? "Sim2Real" : "CoAX");
+  return ivAgentFor(a);
 }
 
 export interface OpTargetCfg {

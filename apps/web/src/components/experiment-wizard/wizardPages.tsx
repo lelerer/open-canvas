@@ -9,6 +9,8 @@ import { ACCENT, InfoTip, DocLabel, TextInput } from "./wizardUi";
 import {
   Page, Answers, parseIvs, parseProcSteps, ProcStep, PROC_STEP_TYPES,
   USER_MODELS, UserModel, parseIdList, cognitiveParamsFor, CognitiveParam,
+  cognitiveAgentFor, cogParamType, cogParamRange, cogParamIssue,
+  parseCogConfig, manipulatedCogParams,
   parseApparatusList, ApparatusEntry, normalizeApparatusEntry, ivGroupOptions,
   instanceIdsOf, trainingInstanceIdsOf,
   STUDY_UI_ROOT, STUDY_PARAM_DEFAULTS, buildStudyUrl,
@@ -598,17 +600,14 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
     setAnswer("ml_proxies", JSON.stringify(next));
   }
 
-  const cogAgent = a.user_model === "CoAX" ? "CoAX" : a.user_model === "CoXAM" ? "CoXAM" : "";
+  const cogAgent = cognitiveAgentFor(a.user_model);
   const cogParams: CognitiveParam[] = cogAgent ? cognitiveParamsFor(cogAgent) : [];
-  const cogCfg: Record<string, string> = (() => { try { return JSON.parse(a.cog_config || "{}"); } catch { return {}; } })();
+  const cogCfg: Record<string, string> = parseCogConfig(a);
   function setCog(name: string, val: string) {
     setAnswer("cog_config", JSON.stringify({ ...cogCfg, [name]: val }));
   }
   // Cognitive parameters manipulated as an IV in Study Design (kept in sync — those are varied, not fixed here).
-  const manipulatedCog: Record<string, string> = {};
-  for (const e of parseIvs(a)) {
-    if (e.factor === "cognitive" && e.cogParam) manipulatedCog[e.cogParam] = e.levels || "";
-  }
+  const manipulatedCog = manipulatedCogParams(a);
 
   function Card({ m, on, multi, onClick }: { m: UserModel; on: boolean; multi: boolean; onClick: () => void }) {
     return (
@@ -649,7 +648,7 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
           </div>
           {(() => {
             // CoAX and CoXAM support different IV levels — flag conflicts with the Study Design.
-            const agentOfModel = a.user_model === "CoXAM" ? "CoXAM" : a.user_model === "Sim2Real" ? "Sim2Real" : a.user_model ? "CoAX" : "";
+            const agentOfModel = a.user_model ? cognitiveAgentFor(a.user_model) || "CoAX" : "";
             if (!agentOfModel) return null;
             const conflicts = parseIvs(a)
               .map((e) => {
@@ -669,16 +668,20 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
 
         {cogParams.length ? (
           <div>
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Cognitive parameters · {cogAgent}</p>
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Cognitive parameters · {a.user_model}</p>
             <div className="space-y-2">
               {cogParams.map((p) => {
                 const manip = manipulatedCog[p.name];
                 const isManip = manip !== undefined;
+                const range = cogParamRange(p);
+                const kind = cogParamType(p);
                 return (
                   <div key={p.name} className="rounded-xl border border-neutral-200 p-3">
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-sm font-medium text-neutral-800">{p.name}</span>
-                      <span className="text-xs text-neutral-400">range {p.min} – {p.max}</span>
+                      <span className="shrink-0 text-xs text-neutral-400">
+                        {kind === "enum" ? (p.options || []).join(" · ") : range ? `range ${range.min} – ${range.max}` : ""}
+                      </span>
                     </div>
                     {p.note ? <p className="mt-0.5 text-xs text-neutral-400">{p.note}</p> : null}
                     {isManip ? (
@@ -688,20 +691,43 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
                       </div>
                     ) : (() => {
                       const v = cogCfg[p.name] ?? "";
-                      const bad = v.trim() !== "" && (Number.isNaN(parseFloat(v)) || parseFloat(v) < p.min || parseFloat(v) > p.max);
+                      const issue = cogParamIssue(p, v);
+                      const bad = issue?.level === "error";
                       return (
                         <div>
-                          <div className="mt-2 flex items-center gap-2 text-sm">
-                            <span className="text-neutral-500">Value:</span>
-                            <input
-                              type="number"
-                              value={v}
-                              onChange={(e) => setCog(p.name, e.target.value)}
-                              placeholder={`${p.min} – ${p.max}`}
-                              className={cn("w-28 border-0 border-b bg-transparent px-0 py-0.5 text-[15px] text-neutral-900 outline-none placeholder:text-neutral-400", bad ? "border-red-400 focus:border-red-500" : "border-neutral-200 focus:border-neutral-500")}
-                            />
-                          </div>
-                          {bad ? <p className="mt-1 text-xs font-medium text-red-600">Value must be between {p.min} and {p.max}.</p> : null}
+                          {/* Enum parameters pick from their options; everything else stays a number field. */}
+                          {kind === "enum" ? (
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              {(p.options || []).map((opt) => {
+                                const on = v === opt;
+                                return (
+                                  <button
+                                    key={opt}
+                                    type="button"
+                                    onClick={() => setCog(p.name, on ? "" : opt)}
+                                    className={cn("rounded-full border px-3 py-1 text-xs font-medium transition-colors", on ? "border-transparent text-white" : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-100")}
+                                    style={on ? { backgroundColor: ACCENT } : undefined}
+                                  >
+                                    {opt}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className="mt-2 flex items-center gap-2 text-sm">
+                              <span className="text-neutral-500">Value:</span>
+                              <input
+                                type="number"
+                                value={v}
+                                onChange={(e) => setCog(p.name, e.target.value)}
+                                placeholder={range ? `${range.min} – ${range.max}` : ""}
+                                className={cn("w-28 border-0 border-b bg-transparent px-0 py-0.5 text-[15px] text-neutral-900 outline-none placeholder:text-neutral-400", bad ? "border-red-400 focus:border-red-500" : "border-neutral-200 focus:border-neutral-500")}
+                              />
+                            </div>
+                          )}
+                          {issue ? (
+                            <p className={cn("mt-1 text-xs font-medium", bad ? "text-red-600" : "text-amber-700")}>{issue.message}</p>
+                          ) : null}
                         </div>
                       );
                     })()}

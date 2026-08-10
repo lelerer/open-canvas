@@ -9,6 +9,7 @@ import {
   ALLOC_OPTIONS, BALANCING_METHODS, parseIvs, totalCells, betweenCells, validateParticipants,
   participantGroups, withinCoverage, unsupportedIvLevels, ivFactorUnsupportedByAgent,
   DATASET_OPTIONS, DV_CATALOG, DV_GROUP_ORDER, DvEntry, parseDvs, Variable, parseVars,
+  ivAgentFor, cogParamType, cogParamRange,
 } from "./questions";
 
 export function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
@@ -311,7 +312,7 @@ export function AllocToggle({ value, onChange }: { value: string; onChange: (v: 
 }
 
 // Discrete numeric levels for range/cognitive IVs (e.g. "2, 8, 10" → 3 levels), each within [min,max].
-function NumericLevelsInput({ value, min, max, onChange }: { value: string; min: number; max: number; onChange: (levels: string) => void }) {
+function NumericLevelsInput({ value, min, max, soft, onChange }: { value: string; min: number; max: number; soft?: boolean; onChange: (levels: string) => void }) {
   const toRaw = (l: string) => l.split("|").map((s) => s.trim()).filter(Boolean).join(", ");
   const toLevels = (r: string) => r.split(",").map((s) => s.trim()).filter(Boolean).join(" | ");
   const [raw, setRaw] = useState(() => toRaw(value));
@@ -330,10 +331,14 @@ function NumericLevelsInput({ value, min, max, onChange }: { value: string; min:
           placeholder="e.g. 2, 8, 10"
           className="min-w-[12rem] flex-1 border-0 border-b border-neutral-200 bg-transparent px-0 py-0.5 text-[15px] text-neutral-900 outline-none placeholder:text-neutral-400 focus:border-neutral-500"
         />
-        <span className="text-neutral-400">(allowed {min}–{max})</span>
+        <span className="text-neutral-400">({soft ? "supported window" : "allowed"} {min}–{max})</span>
       </div>
       {nums.length ? <p className="mt-1 text-xs text-neutral-400">{nums.length} level{nums.length === 1 ? "" : "s"}: {nums.join(", ")}</p> : <p className="mt-1 text-xs text-neutral-400">Enter values separated by commas.</p>}
-      {bad.length ? <p className="mt-1 text-xs font-medium text-red-600">Each level must be a number between {min} and {max}. Check: {bad.join(", ")}.</p> : null}
+      {bad.length ? (
+        soft
+          ? <p className="mt-1 text-xs font-medium text-amber-700">Outside the evidence-supported window {min}–{max} (accepted, but untested): {bad.join(", ")}.</p>
+          : <p className="mt-1 text-xs font-medium text-red-600">Each level must be a number between {min} and {max}. Check: {bad.join(", ")}.</p>
+      ) : null}
     </div>
   );
 }
@@ -425,16 +430,31 @@ export function IvLevelEditor({ factor, entry, agent, onPatch, answers }: { fact
             options={cogParams.map((p) => p.name)}
             placeholder="choose a parameter"
           />
-          {cogParam ? (
-            <div className="text-sm text-neutral-600">
-              {cogParam.note ? <p className="mb-1 text-xs text-neutral-400">{cogParam.note}</p> : null}
-              {cogParam.min < cogParam.max ? (
-                <NumericLevelsInput value={entry.levels ?? ""} min={cogParam.min} max={cogParam.max} onChange={(lv) => onPatch({ levels: lv })} />
-              ) : (
-                <input value={entry.levels ?? ""} onChange={(e) => onPatch({ levels: e.target.value })} placeholder="e.g. top-2 features vs all features" className="w-full border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none placeholder:text-neutral-400 focus:border-neutral-500" />
-              )}
-            </div>
-          ) : null}
+          {cogParam ? (() => {
+            const range = cogParamRange(cogParam);
+            const isEnum = cogParamType(cogParam) === "enum";
+            return (
+              <div className="text-sm text-neutral-600">
+                {cogParam.note ? <p className="mb-1 text-xs text-neutral-400">{cogParam.note}</p> : null}
+                {isEnum ? (
+                  <div className="flex flex-wrap gap-2">
+                    {(cogParam.options || []).map((opt) => {
+                      const on = levels.includes(opt);
+                      return (
+                        <button key={opt} type="button" onClick={() => toggleLevel(opt)} className={cn("rounded-full border px-3 py-1 text-xs font-medium transition-colors", on ? "border-transparent text-white" : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-100")} style={on ? { backgroundColor: ACCENT } : undefined}>
+                          {opt}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : range ? (
+                  <NumericLevelsInput value={entry.levels ?? ""} min={range.min} max={range.max} soft={cogParam.softBounds} onChange={(lv) => onPatch({ levels: lv })} />
+                ) : (
+                  <input value={entry.levels ?? ""} onChange={(e) => onPatch({ levels: e.target.value })} placeholder="e.g. top-2 features vs all features" className="w-full border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none placeholder:text-neutral-400 focus:border-neutral-500" />
+                )}
+              </div>
+            );
+          })() : null}
         </div>
       ) : null}
     </div>
@@ -448,7 +468,7 @@ export const IV_TYPES_DOCS = "#";
 
 export function IvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
   const a = answers;
-  const agent = a.sd_iv_agent || (a.user_model === "CoXAM" ? "CoXAM" : a.user_model === "Sim2Real" ? "Sim2Real" : "CoAX");
+  const agent = ivAgentFor(a);
   const ivs = parseIvs(a);
 
   const [customs, setCustoms] = useState<IvFactor[]>([]);

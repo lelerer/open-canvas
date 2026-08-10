@@ -10,6 +10,7 @@ import {
   parseDvs, dvSummary, dvDisplayName, parseVars, varsSummary, parseProcSteps, procStepsSummary,
   validateParticipants, parseIdList, ivSummaryLines, participantTotals, mlProxyNames, cogConfigSummary,
   parseApparatusList, apparatusSummaryLines,
+  cognitiveAgentFor, resolvedCogParams, cogParamsSummaryLines, parseCogConfig,
 } from "./questions";
 import { buildSurvey, buildSurveyJson, buildQsf } from "./survey";
 
@@ -43,7 +44,8 @@ export function buildExportText(a: Answers): string {
     "",
     "USER MODEL", v("user_model"),
     `Comparison baselines: ${mlProxyNames(a) || "(none)"}`,
-    `Cognitive config: ${cogConfigSummary(a) || "(defaults)"}`, "",
+    `Cognitive config: ${cogConfigSummary(a) || "(defaults)"}`,
+    ...(cogParamsSummaryLines(a).length ? ["Cognitive parameters:", ...cogParamsSummaryLines(a).map((l) => `  - ${l}`)] : []), "",
   ].join("\n");
 }
 
@@ -76,8 +78,12 @@ export function buildExportJson(a: Answers): string {
     apparatus: parseApparatusList(a),
     procedure: parseProcSteps(a.proc_steps),
     userModel: t("user_model"),
+    cognitiveAgent: cognitiveAgentFor(a.user_model) || null,
     mlProxyBaselines: parseIdList(a.ml_proxies),
-    cognitiveConfig: (() => { try { return JSON.parse(a.cog_config || "{}"); } catch { return {}; } })(),
+    cognitiveConfig: parseCogConfig(a),
+    // Every parameter of the chosen cognitive model with the value actually in
+    // play (user-set, varied as an IV, or the model's own default) + its bounds.
+    cognitiveParameters: resolvedCogParams(a),
     _rawAnswers: a,
   };
   return JSON.stringify(obj, null, 2);
@@ -126,6 +132,7 @@ export function buildExportDoc(a: Answers): string {
     <p>${t("user_model")}</p>
     ${mlProxyNames(a) ? `<p><b>Comparison baselines:</b> ${esc(mlProxyNames(a))}</p>` : ""}
     ${cogConfigSummary(a) ? `<p><b>Cognitive config:</b> ${esc(cogConfigSummary(a))}</p>` : ""}
+    ${cogParamsSummaryLines(a).length ? `<p><b>Cognitive parameters:</b></p><ul>${cogParamsSummaryLines(a).map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : ""}
   `;
   return `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>Experiment Design</title><style>
     body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1f2937;}
@@ -255,6 +262,14 @@ export function ReviewPage({ answers, onJump }: { answers: Answers; onJump: (id:
           <RRow label="User model" value={a.user_model} />
           <RRow label="Comparison baselines" value={mlProxyNames(a)} />
           <RRow label="Cognitive config" value={cogConfigSummary(a)} />
+          {cogParamsSummaryLines(a).length ? (
+            <div className="grid grid-cols-[170px_1fr] gap-3 py-1.5 text-[15px]">
+              <span className="text-neutral-500">Cognitive parameters</span>
+              <span className="space-y-0.5 text-neutral-900">
+                {cogParamsSummaryLines(a).map((line, i) => (<span key={i} className="block">{line}</span>))}
+              </span>
+            </div>
+          ) : null}
         </RSection>
 
         {(() => {

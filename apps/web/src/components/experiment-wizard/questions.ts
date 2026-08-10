@@ -61,8 +61,13 @@ export function parseIdList(raw: string | undefined): string[] {
   return s.split(",").map((x) => x.trim()).filter(Boolean);
 }
 
+// The CoAX variant for XAI-Property designs. It runs on the Sim2Real
+// synthetic-AI interface, so it resolves to the "Sim2Real" IV/cognitive agent.
+export const COAX_XAI_PROPERTY = "CoAX (XAI Property)";
+
 export const USER_MODELS: UserModel[] = [
   { id: "CoAX", name: "CoAX", full: "Interpreting Attribution XAI", description: "A cognitive user model of how people interpret attribution-based explanations (e.g. LIME / SHAP feature attributions).", category: "Cognitive model" },
+  { id: COAX_XAI_PROPERTY, name: "CoAX", full: "Interpreting XAI with Different Properties", description: "The CoAX model for XAI-Property designs — how people interpret explanations that are faithful, sparse, robust or sparse_robust. Runs on the Sim2Real synthetic-AI interface.", category: "Cognitive model" },
   { id: "CoXAM", name: "CoXAM", full: "Interpreting Global XAI (Rules vs Weights)", description: "A cognitive user model of how people interpret global surrogate explanations — decision-tree rules vs logistic-regression weights.", category: "Cognitive model" },
   // Comparison baselines (simple standard models run alongside for comparison):
   { id: "KNN", name: "KNN", full: "k-Nearest Neighbours", description: "A simple, standard model used as a comparison baseline. Works with both CoAX and CoXAM.", category: "Comparison baseline" },
@@ -84,10 +89,19 @@ export const BALANCING_METHODS = [
 // ---- IV catalog (levels depend on the model/framework) ----
 export const IV_AGENTS = ["CoAX", "CoXAM", "Sim2Real"] as const;
 
+export type CogParamType = "float" | "integer" | "enum";
+
 export interface CognitiveParam {
-  name: string;
-  min: number;
-  max: number;
+  name: string; // display label — also the key used inside cog_config
+  key?: string; // backend parameter name (e.g. "max_features_attended"); derived from `name` when absent
+  type?: CogParamType; // default "float"
+  min?: number; // numeric types only
+  max?: number;
+  step?: number; // input granularity for numeric types
+  options?: string[]; // enum only
+  default?: string | number; // recommended starting value (what the wizard suggests)
+  modelDefault?: string | number; // what the model itself uses when left blank
+  softBounds?: boolean; // the backend accepts any value — min/max is an advisory window
   note?: string;
 }
 
@@ -171,19 +185,53 @@ export const IV_CATALOG: IvFactor[] = [
     def: "Parameters of the cognitive user model (memory, attention, etc.).",
     cognitiveByAgent: {
       CoAX: [
-        { name: "Retrieval Threshold", min: -2.3, max: -1.5, note: "Memory capacity; higher = harder retrieval / more forgetting." },
-        { name: "Exemplar Distance Sensitivity", min: 1, max: 10, note: "How strongly distance affects similarity." },
+        { name: "Retrieval Threshold", min: -4.0, max: -0.97, note: "Memory capacity; higher = harder retrieval / more forgetting." },
+        { name: "Exemplar Distance Sensitivity", min: 1, max: 20, note: "How strongly distance affects similarity." },
         { name: "Attended Features", min: 1, max: 5, note: "Attention span — features attended when comparing exemplars." },
-        { name: "Feature-Class Sensitivity", min: 1, max: 7, note: "How strongly attribution maps to classes." },
+        { name: "Feature-Class Sensitivity", min: 1, max: 8, note: "How strongly attribution maps to classes." },
       ],
       CoXAM: [
-        { name: "Retrieval Threshold", min: -2.8, max: -1.5, note: "How easily info is retrieved from memory." },
-        { name: "Opportunity Cost", min: 0, max: 10, note: "Accuracy-time tradeoff (computational rationality / RL)." },
-        { name: "Diffusion Noise", min: 0, max: 1, note: "Stochasticity during forward simulation." },
-        { name: "Counterfactual Margin", min: 0, max: 1, note: "Margin when evaluating counterfactual changes." },
+        // The valid range depends on the user task, so the field spans both; the
+        // note carries the per-task window and default.
+        { name: "Retrieval Threshold", key: "memory_recall_threshold", type: "float", min: -2.0, max: 2.0, step: 0.05, note: "How easily info is retrieved from memory. Valid range depends on the task — forward simulation: -1.0 to 2.0 (default 0.5); counterfactual simulation: -2.0 to 0.5 (default -0.75)." },
+        { name: "Opportunity Cost", key: "opportunity_cost", type: "float", min: 0.0, max: 0.02, step: 0.001, default: 0.01, note: "Accuracy-time tradeoff (computational rationality / RL). Forward simulation only." },
+        { name: "Diffusion Noise", key: "decision_noise", type: "float", min: 0.3, max: 0.7, step: 0.01, default: 0.4, note: "Stochasticity during forward simulation. Forward simulation only." },
+        { name: "Counterfactual Margin", key: "counterfactual_overshoot_fraction", type: "float", min: 0.0, max: 0.5, step: 0.01, default: 0.25, note: "Margin when evaluating counterfactual changes. Counterfactual simulation only." },
       ],
+      // CoAX (XAI Property) — the Sim2Real synthetic-AI study.
       Sim2Real: [
-        { name: "Memory / cognitive budget", min: 0, max: 0, note: "Top-2 features vs all features." },
+        {
+          name: "Max Features Attended",
+          key: "max_features_attended",
+          type: "integer",
+          min: 1,
+          max: 12,
+          step: 1,
+          default: 4,
+          modelDefault: 12,
+          note: "How many explanation features the simulated user attends to. The model itself defaults to all 12; 4 is the value that best matches the measured behaviour.",
+        },
+        {
+          name: "Aggregation Strategy",
+          key: "aggregation_strategy",
+          type: "enum",
+          options: ["attribution", "value_weighted"],
+          default: "value_weighted",
+          modelDefault: "attribution",
+          note: "How evidence from the attended features is combined into a decision.",
+        },
+        {
+          name: "Confidence Responsiveness",
+          key: "confidence_responsiveness",
+          type: "float",
+          min: -3.0,
+          max: 1.0,
+          step: 0.1,
+          default: -1.5,
+          modelDefault: 0.0,
+          softBounds: true,
+          note: "Applies to all aggregation strategies. Lower = more responsive to the change. The backend accepts any float; −3.0 to 1.0 is the evidence-supported window, with the optimum at −1.5 (flat between −2.0 and −1.0), which is most accurate to the measured effect.",
+        },
       ],
     },
   },
@@ -562,6 +610,53 @@ export function cognitiveParamsFor(agent: string): CognitiveParam[] {
   return (f?.cognitiveByAgent && f.cognitiveByAgent[agent]) || [];
 }
 
+export function cogParamType(p: CognitiveParam): CogParamType {
+  return p.type ?? "float";
+}
+
+// Backend parameter name — explicit `key`, else a snake_case slug of the label.
+export function cogParamKey(p: CognitiveParam): string {
+  return p.key ?? p.name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+export function cogParamRange(p: CognitiveParam): { min: number; max: number } | null {
+  if (typeof p.min !== "number" || typeof p.max !== "number" || p.min >= p.max) return null;
+  return { min: p.min, max: p.max };
+}
+
+// null when the value is fine. "error" blocks (the backend would reject it);
+// "warn" is advisory — a soft-bounded parameter outside its supported window.
+export function cogParamIssue(p: CognitiveParam, raw: string): { level: "error" | "warn"; message: string } | null {
+  const v = (raw || "").trim();
+  if (!v) return null;
+  if (cogParamType(p) === "enum") {
+    return p.options && !p.options.includes(v) ? { level: "error", message: `Choose one of: ${p.options.join(", ")}.` } : null;
+  }
+  const n = Number(v);
+  if (!Number.isFinite(n)) return { level: "error", message: "Enter a number." };
+  if (cogParamType(p) === "integer" && !Number.isInteger(n)) return { level: "error", message: "Enter a whole number." };
+  const r = cogParamRange(p);
+  if (r && (n < r.min || n > r.max)) {
+    return p.softBounds
+      ? { level: "warn", message: `Outside the evidence-supported window (${r.min} to ${r.max}) — accepted, but untested.` }
+      : { level: "error", message: `Value must be between ${r.min} and ${r.max}.` };
+  }
+  return null;
+}
+
+// The cognitive/IV agent behind a user model — "" for custom or unset models.
+export function cognitiveAgentFor(userModel: string | undefined): string {
+  const m = (userModel || "").trim();
+  if (m === COAX_XAI_PROPERTY) return "Sim2Real";
+  return (IV_AGENTS as readonly string[]).includes(m) ? m : "";
+}
+
+// The agent used to resolve IV levels: the explicit choice, else the one behind
+// the chosen user model, else CoAX.
+export function ivAgentFor(a: Answers): string {
+  return (a.sd_iv_agent || "").trim() || cognitiveAgentFor(a.user_model) || "CoAX";
+}
+
 // ---- Completeness ----
 export function isPageComplete(page: Page, a: Answers): boolean {
   const has = (k: string) => (a[k] || "").trim().length > 0;
@@ -688,6 +783,89 @@ export function cogConfigSummary(a: Answers): string {
   let obj: Record<string, string> = {};
   try { obj = JSON.parse(a.cog_config || "{}"); } catch { obj = {}; }
   return Object.entries(obj).filter(([, v]) => String(v).trim()).map(([k, v]) => `${k}=${v}`).join(", ");
+}
+
+export function parseCogConfig(a: Answers): Record<string, string> {
+  try {
+    const o = JSON.parse(a.cog_config || "{}");
+    return o && typeof o === "object" ? (o as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+// Cognitive parameters that are varied as an IV on the Study Design page
+// (parameter name → the levels being tested) — those are not fixed values.
+export function manipulatedCogParams(a: Answers): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const e of parseIvs(a)) {
+    if (e.factor === "cognitive" && e.cogParam) out[e.cogParam] = e.levels || "";
+  }
+  return out;
+}
+
+// Every cognitive parameter of the selected user model with the value actually
+// in play: the one the user set, the levels it is varied over, or the model's
+// own default. This is what the design JSON exports.
+export interface ResolvedCogParam {
+  key: string;
+  label: string;
+  type: CogParamType;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: string[];
+  recommendedDefault?: string | number;
+  modelDefault?: string | number;
+  value: string | number | null; // null when varied as an IV
+  levels?: string; // the levels tested, when varied as an IV
+  source: "set" | "manipulated" | "model default";
+  softBounds?: boolean;
+  note?: string;
+}
+
+export function resolvedCogParams(a: Answers): ResolvedCogParam[] {
+  const agent = cognitiveAgentFor(a.user_model);
+  if (!agent) return [];
+  const cfg = parseCogConfig(a);
+  const manipulated = manipulatedCogParams(a);
+  const coerce = (p: CognitiveParam, v: string | number | undefined): string | number | null => {
+    if (v === undefined || v === null || String(v).trim() === "") return null;
+    if (cogParamType(p) === "enum") return String(v);
+    const n = Number(v);
+    return Number.isFinite(n) ? n : String(v);
+  };
+
+  return cognitiveParamsFor(agent).map((p) => {
+    const manip = manipulated[p.name];
+    const set = (cfg[p.name] ?? "").trim();
+    const base: ResolvedCogParam = {
+      key: cogParamKey(p),
+      label: p.name,
+      type: cogParamType(p),
+      ...(typeof p.min === "number" ? { min: p.min } : {}),
+      ...(typeof p.max === "number" ? { max: p.max } : {}),
+      ...(p.step !== undefined ? { step: p.step } : {}),
+      ...(p.options ? { options: p.options } : {}),
+      ...(p.default !== undefined ? { recommendedDefault: p.default } : {}),
+      ...(p.modelDefault !== undefined ? { modelDefault: p.modelDefault } : {}),
+      ...(p.softBounds ? { softBounds: true } : {}),
+      ...(p.note ? { note: p.note } : {}),
+      value: null,
+      source: "model default",
+    };
+    if (manip !== undefined) return { ...base, value: null, levels: manip, source: "manipulated" };
+    if (set) return { ...base, value: coerce(p, set), source: "set" };
+    return { ...base, value: coerce(p, p.modelDefault), source: "model default" };
+  });
+}
+
+export function cogParamsSummaryLines(a: Answers): string[] {
+  return resolvedCogParams(a).map((p) => {
+    if (p.source === "manipulated") return `${p.label} (${p.key}): manipulated as an IV — ${p.levels || "(no levels set)"}`;
+    if (p.value === null) return `${p.label} (${p.key}): (model default)`;
+    return `${p.label} (${p.key}): ${p.value}${p.source === "model default" ? " (model default)" : ""}`;
+  });
 }
 
 export function participantTotals(a: Answers) {
