@@ -73,6 +73,8 @@ export function buildExportJson(a: Answers): string {
       participantsPerCondition: a.sd_participants ? p.per : null,
       totalParticipants: a.sd_participants ? p.totalP : null,
       trialsPerParticipant: p.trials,
+      trainingTrialsPerParticipant: p.training,
+      testingTrialsPerParticipant: p.testing,
       totalTrials: a.sd_participants ? p.totalTrials : null,
     },
     apparatus: parseApparatusList(a),

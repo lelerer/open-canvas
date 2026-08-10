@@ -1,23 +1,32 @@
 "use client";
 
 import React, { useState, useEffect, useRef, type ReactNode } from "react";
-import { Upload, Plus, X, Wand2, ChevronLeft, ChevronRight, Play, BarChart3, Check, Download } from "lucide-react";
+import { Upload, Plus, X, Wand2, ChevronLeft, ChevronRight, Play, BarChart3, Check, Download, Bot, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { ACCENT, InfoTip, DocLabel, TextInput } from "./wizardUi";
 import {
-  Page, Answers, parseIvs, parseProcSteps, ProcStep, PROC_STEP_TYPES,
+  Page, PAGES, isPageComplete, Answers, parseIvs, parseDvs, dvDisplayName, parseProcSteps, ProcStep, PROC_STEP_TYPES,
   USER_MODELS, UserModel, parseIdList, cognitiveParamsFor, CognitiveParam,
   cognitiveAgentFor, cogParamType, cogParamRange, cogParamIssue,
-  parseCogConfig, manipulatedCogParams,
+  parseCogConfig, manipulatedCogParams, trialSplit,
   parseApparatusList, ApparatusEntry, normalizeApparatusEntry, ivGroupOptions,
   instanceIdsOf, trainingInstanceIdsOf,
   STUDY_UI_ROOT, STUDY_PARAM_DEFAULTS, buildStudyUrl,
   STUDY_DATASETS, EXPLANATION_FORMS, INTERFACE_ELEMENTS, EXPLANATION_PROPERTIES,
-  formOf, namespaceOf, elementsOf, instanceRangeFor, studyNaturalSize, hasXaiPropertyIv,
+  formOf, namespaceOf, elementsOf, instanceRangeFor, testInstanceHint, defaultSim2realInstanceIds,
+  apparatusForTrial, trialStudyUrl, trialShowedXai,
+  studyNaturalSize, hasXaiPropertyIv,
   sim2realPropertyOf, unsupportedIvLevels, ivFactorUnsupportedByAgent,
 } from "./questions";
+import { buildExportJson } from "./wizardReview";
+import {
+  ApiConfig, DEFAULT_API_BASE, API_BASE_KEY, API_TOKEN_KEY, SimulationMode,
+  StageProgress, RunOutcome, runStudy, simulateOptionsFor, downloadResultsCsv, pngDataUris,
+  TrialView, trialViewOf, runPostHoc, tablesFrom, formatCell, SimpleTable,
+  dvColumnsOf, matchDvColumn,
+} from "./server";
 
 // Re-exported for backward compatibility with existing imports of these from this module.
 export { STUDY_UI_ROOT, STUDY_PARAM_DEFAULTS, buildStudyUrl } from "./questions";
@@ -134,7 +143,7 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
   // XAI Property designs run on the Sim2Real interface — seed new configs accordingly.
   const hasXP = hasXaiPropertyIv(a);
   function addEntry() {
-    const seedParams = hasXP ? { appId: "adult_sim2real" } : {};
+    const seedParams = hasXP ? { appId: "adult_sim2real", ...defaultSim2realInstanceIds() } : {};
     const e = normalizeApparatusEntry({ label: `Configuration ${entries.length + 1}`, group: "All participants", mode: "ours", params: seedParams, url: "" });
     saveList([...entries, e]);
     setEditingId(e.id);
@@ -211,6 +220,7 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                     const range = instanceRangeFor(p);
                     const ids = instanceIdsOf(p);
                     const trainIds = trainingInstanceIdsOf(p);
+                    const hint = testInstanceHint(p); // what's left for testing once training has taken its share
                     const outOfRange = (id: string) => { const n = Number(id); return !Number.isInteger(n) || n < range.min || n > range.max; };
                     const badIds = [...trainIds, ...ids].filter(outOfRange);
                     const dsLabel = STUDY_DATASETS.find((d) => d.appId === (p.appId || "wine_quality"))?.label ?? p.appId;
@@ -295,7 +305,19 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                           <p className="mt-0.5 text-xs text-neutral-400">Choose the data, explanation, and example shown in the preview. The AI model is set automatically by the dataset.</p>
                           <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
                             <ParamField label="Dataset">
-                              <select value={p.appId || "wine_quality"} onChange={(ev) => setParam(e, "appId", ev.target.value)} className={pcls}>
+                              <select
+                                value={p.appId || "wine_quality"}
+                                onChange={(ev) => {
+                                  const appId = ev.target.value;
+                                  // Switching to the Sim2Real screen seeds its train/test split,
+                                  // but never overwrites instance lists already entered.
+                                  const seed = appId === "adult_sim2real" && !e.params.trainingInstanceIds && !e.params.instanceIds
+                                    ? defaultSim2realInstanceIds()
+                                    : {};
+                                  patchEntry(e.id, { params: { ...e.params, appId, ...seed } });
+                                }}
+                                className={pcls}
+                              >
                                 {STUDY_DATASETS.map((d) => (<option key={d.appId} value={d.appId}>{d.label}</option>))}
                               </select>
                             </ParamField>
@@ -340,23 +362,22 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                                 </select>
                               </ParamField>
                             )}
-                            {ns !== "global" ? (
-                              <ParamField label="Training instances · feedback shown">
-                                <input
-                                  type="text"
-                                  value={p.trainingInstanceIds ?? ""}
-                                  onChange={(ev) => setParam(e, "trainingInstanceIds", ev.target.value)}
-                                  placeholder="optional — e.g. 0-2"
-                                  className={pcls}
-                                />
-                              </ParamField>
-                            ) : null}
-                            <ParamField label={`Test instances (trials) · ${range.min}–${range.max}`}>
+                            <ParamField label={`Train instances (trials) · ${range.min}–${range.max}`}>
+                              <input
+                                type="text"
+                                value={p.trainingInstanceIds ?? ""}
+                                onChange={(ev) => setParam(e, "trainingInstanceIds", ev.target.value)}
+                                placeholder="optional — e.g. 0-9"
+                                className={pcls}
+                              />
+                            </ParamField>
+                            {/* The test range narrows past whatever the train list has taken. */}
+                            <ParamField label={`Test instances (trials) · ${hint.min}–${hint.max}`}>
                               <input
                                 type="text"
                                 value={p.instanceIds ?? ids.join(", ")}
                                 onChange={(ev) => setParam(e, "instanceIds", ev.target.value)}
-                                placeholder="e.g. 0, 3, 7 or 0-9"
+                                placeholder={`e.g. ${hint.min}-${Math.min(hint.min + 9, hint.max)}`}
                                 className={pcls}
                               />
                             </ParamField>
@@ -381,6 +402,11 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                           )}
                           {badIds.length ? (
                             <p className="mt-1 text-xs font-medium text-red-600">Out of range for {dsLabel} (the {ns} interface allows {range.min}–{range.max}): {badIds.join(", ")}. The two interfaces index different corpora — re-check IDs after changing the explanation form.</p>
+                          ) : null}
+                          {hint.overlap.length ? (
+                            <p className="mt-1 text-xs font-medium text-red-600">
+                              Instance{hint.overlap.length === 1 ? "" : "s"} {hint.overlap.join(", ")} {hint.overlap.length === 1 ? "is" : "are"} in both the train and test lists — participants would be tested on an instance they already practised. Remove {hint.overlap.length === 1 ? "it" : "them"} from one list.
+                            </p>
                           ) : null}
 
                           <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2">
@@ -771,52 +797,621 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
   );
 }
 
-export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
-  const a = answers;
-  const status = a.run_status || "idle"; // "idle" | "running" | "done"
-  const [note, setNote] = useState("");
+/**
+ * One trial: the explanation preview on top, the predictions below.
+ *
+ * The preview is deliberately empty. Drawing the explanation the trial was
+ * actually simulated with needs per-trial data the server does not expose yet
+ * (the /explanations stage writes them to disk; nothing reads them back), and
+ * the hosted apparatus renderer would show its own explanation rather than
+ * that one. The frame and the prediction rows work now; the preview fills in
+ * once the endpoint lands.
+ */
+// Rows carry raw 0/1. What they mean depends on the question the run asked:
+// a class ("Type 1"/"Type 2") for CoAX and CoXAM, a direction for Sim2Real,
+// whose counterfactual screen asks whether income goes higher or lower.
+const ANSWER_LABELS: Record<TrialView["answerKind"], string[]> = {
+  class: ["Type 1", "Type 2"],
+  direction: ["Lower", "Higher"],
+};
+const ANSWER_COLORS = ["#dc2626", "#2563eb"]; // 0 red, 1 blue
 
-  function run() {
-    setAnswer("run_status", "running");
-    // Placeholder: no real execution yet.
-    window.setTimeout(() => setAnswer("run_status", "done"), 1200);
-  }
+function answerIndex(v: string): number {
+  const n = Number((v ?? "").trim());
+  return Number.isInteger(n) && n >= 0 && n < 2 ? n : -1;
+}
+function answerLabel(v: string, kind: TrialView["answerKind"]): string {
+  const i = answerIndex(v);
+  return i < 0 ? v : ANSWER_LABELS[kind][i];
+}
+function answerColor(v: string): string {
+  const i = answerIndex(v);
+  return i < 0 ? "#1c1917" : ANSWER_COLORS[i];
+}
+
+export function TrialPreview({ view, caseNumber, url }: { view: TrialView; caseNumber: number; url?: string }) {
+  // In a forward-simulation design the participant predicts what the AI
+  // predicts, so the AI's own prediction is the reference — "Actual (AI)".
+  // A dataset ground truth is shown as its own row only when the run has one.
+  const rows: { key: string; label: string; text: string; note?: string; badge: string; icon: ReactNode }[] = [
+    {
+      key: "sim",
+      label: "Simulation",
+      text: view.simulation?.prediction ?? "",
+      note: view.probCorrect !== null ? `P(correct) ${view.probCorrect.toFixed(0)}%`
+        : view.simulation?.confidence != null ? `Confidence ${view.simulation.confidence.toFixed(0)}%`
+          : undefined,
+      badge: "#1d4ed8",
+      icon: <Bot className="h-4 w-4" />,
+    },
+    {
+      key: "human",
+      label: "Human",
+      text: view.human?.prediction ?? "",
+      note: view.human?.confidence != null ? `Confidence ${view.human.confidence.toFixed(0)}%` : undefined,
+      badge: "#e8590c",
+      icon: <User className="h-4 w-4" />,
+    },
+    {
+      key: "ai",
+      label: "Actual (AI)",
+      text: view.ai?.prediction ?? "",
+      note: view.ai?.confidence != null ? `Confidence ${view.ai.confidence.toFixed(0)}%` : undefined,
+      badge: "#7c2d12",
+      icon: <span className="text-[9px] font-bold leading-none">AI</span>,
+    },
+    {
+      key: "truth",
+      label: "Ground truth",
+      text: view.actual,
+      badge: "#44403c",
+      icon: <Check className="h-4 w-4" />,
+    },
+  ].filter((r) => r.text !== "");
 
   return (
-    <div className="mx-auto w-full max-w-2xl px-6 py-10">
+    <div className="overflow-hidden rounded-xl border border-neutral-200" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+      <p className="border-b border-neutral-200 px-3 py-2 text-center text-sm text-neutral-700">
+        Case {caseNumber}
+        {view.instanceId ? <> · Instance {view.instanceId}</> : null}
+        {view.phase || view.step ? (
+          <span className="text-neutral-400"> · {[view.phase, view.step].filter(Boolean).join(" / ")}</span>
+        ) : null}
+        <span className="text-neutral-400">
+          {" · "}
+          {trialShowedXai(view)
+            ? `with XAI${view.shownXaiType ? ` (${view.shownXaiType})` : ""}`
+            : "without XAI"}
+        </span>
+      </p>
+
+      {/* The study interface replayed at this trial's instance. Note this is the
+          renderer's own explanation for the instance, not the one the run
+          generated — those are only on the server's disk today. */}
+      {url ? (
+        <iframe
+          src={url}
+          title={`Trial ${caseNumber} — instance ${view.instanceId}`}
+          className="block w-full border-b border-neutral-200"
+          style={{ height: 620 }}
+        />
+      ) : (
+        <div className="grid min-h-[220px] place-items-center border-b border-neutral-200 bg-neutral-50/60 p-6 text-center">
+          <p className="max-w-sm text-xs text-neutral-400">
+            No interface for this trial — the results carry no instance id, or the apparatus for this condition uses your own URL.
+          </p>
+        </div>
+      )}
+
+      <p className="px-3 pb-1 pt-2 text-center text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">
+        Prediction
+      </p>
+
+      <div className="divide-y divide-neutral-100 border-t border-neutral-100">
+        {rows.map((r) => (
+          <div key={r.key} className="flex items-center gap-3 px-4 py-2.5">
+            <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-white" style={{ backgroundColor: r.badge }}>
+              {r.icon}
+            </span>
+            <span className="w-32 shrink-0 text-[15px] text-neutral-400">{r.label}</span>
+            <span className="flex-1 font-mono text-[15px] font-semibold tracking-tight" style={{ color: answerColor(r.text) }}>
+              {answerLabel(r.text, view.answerKind)}
+            </span>
+            {r.note ? <span className="shrink-0 font-mono text-sm text-neutral-400">{r.note}</span> : null}
+          </div>
+        ))}
+      </div>
+
+      {view.matchesAi !== null ? (
+        // Amber rather than red for a mismatch: red already means "Type 1" above.
+        <p className="border-t border-neutral-100 px-4 py-2 text-xs" style={{ color: view.matchesAi ? ACCENT : "#b45309" }}>
+          {view.matchesAi ? "Simulation matched the AI" : "Simulation differed from the AI"}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+// Renders whatever rows the server returned — columns follow the payload, so
+// this survives the analysis / post-hoc schemas changing shape.
+function StatTable({ table }: { table: SimpleTable }) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [overflow, setOverflow] = useState(false);
+  const [atEnd, setAtEnd] = useState(false);
+
+  // Only advertise scrolling when the table really is wider than its box.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const measure = () => {
+      const over = el.scrollWidth > el.clientWidth + 1;
+      setOverflow(over);
+      setAtEnd(!over || el.scrollLeft + el.clientWidth >= el.scrollWidth - 1);
+    };
+    measure();
+    el.addEventListener("scroll", measure, { passive: true });
+    window.addEventListener("resize", measure);
+    return () => { el.removeEventListener("scroll", measure); window.removeEventListener("resize", measure); };
+  }, [table]);
+
+  return (
+    <div className="rounded-xl border border-neutral-200">
+      <div className="flex items-center gap-2 border-b border-neutral-100 px-3 py-2">
+        {table.label ? <p className="text-xs font-medium text-neutral-500">{table.label}</p> : null}
+        {overflow ? (
+          <span className="ml-auto flex items-center gap-1 text-[11px] text-neutral-400">
+            scroll for {table.columns.length} columns <ChevronRight className="h-3 w-3" />
+          </span>
+        ) : null}
+      </div>
+      <div className="relative">
+        {/* Fade on the right edge while there is more table off-screen. */}
+        {overflow && !atEnd ? (
+          <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-8 bg-gradient-to-l from-white to-transparent" />
+        ) : null}
+        <div ref={scrollRef} className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="text-neutral-400">
+              <tr>
+                {table.columns.map((c) => (
+                  <th key={c} className="whitespace-nowrap px-3 py-1.5 font-medium">{c.replace(/_/g, " ")}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="text-neutral-700">
+              {table.rows.map((r, i) => (
+                <tr key={i} className="border-t border-neutral-100">
+                  {table.columns.map((c) => (
+                    <td key={c} className="whitespace-nowrap px-3 py-1.5 font-mono">{formatCell(r[c])}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
+  const a = answers;
+  const status = a.run_status || "idle"; // "idle" | "running" | "done" | "failed"
+
+  const [baseUrl, setBaseUrl] = useState(DEFAULT_API_BASE);
+  const [token, setToken] = useState("");
+  const [showSettings, setShowSettings] = useState(false);
+  // Runs always simulate the whole experiment; the narrower /simulate modes are
+  // not exposed here.
+  const mode: SimulationMode = "whole_experiment";
+  const [stages, setStages] = useState<StageProgress[]>([]);
+  const [error, setError] = useState("");
+  const [outcome, setOutcome] = useState<RunOutcome | null>(null);
+  const [note, setNote] = useState("");
+  const [trialIdx, setTrialIdx] = useState(0);
+  const [pid, setPid] = useState("");
+  const [cond, setCond] = useState("");
+  const [resultView, setResultView] = useState<"trial" | "overall">("trial");
+  const [dv, setDv] = useState("");
+  const [posthoc, setPosthoc] = useState<unknown>(null);
+  const [posthocErr, setPosthocErr] = useState("");
+  const abortRef = useRef<AbortController | null>(null);
+
+  // The server URL and token are machine settings, not part of the design, so
+  // they live in localStorage rather than in the answers.
+  useEffect(() => {
+    try {
+      setBaseUrl(localStorage.getItem(API_BASE_KEY) || DEFAULT_API_BASE);
+      setToken(localStorage.getItem(API_TOKEN_KEY) || "");
+    } catch { /* ignore */ }
+  }, []);
+  function saveBaseUrl(v: string) {
+    setBaseUrl(v);
+    try { localStorage.setItem(API_BASE_KEY, v); } catch { /* ignore */ }
+  }
+  function saveToken(v: string) {
+    setToken(v);
+    try { localStorage.setItem(API_TOKEN_KEY, v); } catch { /* ignore */ }
+  }
+
+  const cfg: ApiConfig = { baseUrl, token };
+
+  // The design is only sent once it is finished — the same completeness check
+  // the sidebar uses, across every page that gates generation.
+  const incomplete = PAGES.filter((p) => p.kind !== "review" && p.kind !== "results" && !isPageComplete(p, a));
+  const ready = incomplete.length === 0;
+
+  const { framework, options: simOptions, warning: cogWarning } = simulateOptionsFor(
+    a.user_model || "",
+    hasXaiPropertyIv(a),
+    parseCogConfig(a),
+    mode
+  );
+
+  async function run() {
+    if (!ready || status === "running") return;
+    // The design is assembled here, at the click, from the finalized answers —
+    // byte-identical to the Design JSON export so the two can't drift.
+    let design: unknown;
+    try {
+      design = JSON.parse(buildExportJson(a));
+    } catch (e) {
+      setError(`Could not build the design JSON: ${(e as Error).message}`);
+      return;
+    }
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    setError("");
+    setNote("");
+    setOutcome(null);
+    setStages([]);
+    setAnswer("run_status", "running");
+    try {
+      const split = trialSplit(a);
+      const res = await runStudy(
+        cfg,
+        design,
+        simOptions,
+        {
+          signal: ctrl.signal,
+          onStages: setStages,
+          onStudyId: (id) => setAnswer("run_study_id", id),
+        },
+        // The training / testing split set on the Study Design page.
+        { trials: { num_training: split.training, num_testing: split.testing } }
+      );
+      setOutcome(res);
+      setAnswer("run_status", "done");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setAnswer("run_status", "failed");
+    } finally {
+      abortRef.current = null;
+    }
+  }
+
+  function cancel() {
+    abortRef.current?.abort();
+  }
+
+  const studyId = outcome?.studyId || a.run_study_id || "";
+  const rows = outcome?.results ?? [];
+  const pngs = pngDataUris(outcome?.plot);
+  // Trials are stepped through one participant at a time, so the case number
+  // never runs past what a single participant actually saw.
+  const views = rows.map(trialViewOf);
+  // Condition first, then participant within it, then trial within that.
+  const conditions = Array.from(new Set(views.map((v) => v.condition).filter(Boolean)));
+  const activeCond = conditions.includes(cond) ? cond : conditions[0] ?? "";
+  const cViews = activeCond ? views.filter((v) => v.condition === activeCond) : views;
+  const participantIds = Array.from(new Set(cViews.map((v) => v.participantId).filter(Boolean)));
+  const activePid = participantIds.includes(pid) ? pid : participantIds[0] ?? "";
+  const pViews = activePid ? cViews.filter((v) => v.participantId === activePid) : cViews;
+  const trialAt = pViews.length ? Math.min(trialIdx, pViews.length - 1) : 0;
+  const trial = pViews.length ? pViews[trialAt] : null;
+
+  // Statistics for the Overall view. The omnibus analysis comes back with the
+  // run; post-hoc needs a DV, so it is fetched on demand once that view is open.
+  // The server analyses its own results columns, so the options come from the
+  // data; the design's DV labels only decide which one is selected first.
+  const dvOptions = dvColumnsOf(rows);
+  const designDvs = parseDvs(a.sd_dv).map(dvDisplayName).filter(Boolean);
+  const preferredDv = designDvs.map((d) => matchDvColumn(d, dvOptions)).find(Boolean) ?? "";
+  const activeDv = dvOptions.includes(dv) ? dv : preferredDv || dvOptions[0] || "";
+  const analysisTables = tablesFrom(outcome?.analysis, "");
+  const posthocTables = tablesFrom(posthoc, "");
+
+  useEffect(() => {
+    if (resultView !== "overall" || !studyId || !activeDv) return;
+    let cancelled = false;
+    setPosthocErr("");
+    runPostHoc(cfg, studyId, { dv: activeDv })
+      .then((r) => { if (!cancelled) setPosthoc(r); })
+      .catch((e) => { if (!cancelled) { setPosthoc(null); setPosthocErr(e instanceof Error ? e.message : String(e)); } });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resultView, studyId, activeDv, baseUrl, token]);
+
+  // Replay the trial on the study interface: the apparatus config for this
+  // trial's condition, at the instance the run actually used.
+  const trialUrl = (() => {
+    if (!trial || !trial.instanceId) return "";
+    const entry = apparatusForTrial(parseApparatusList(a), { condition: trial.condition });
+    if (entry?.mode === "own") return (entry.url || "").trim();
+    return trialStudyUrl(STUDY_UI_ROOT, entry, {
+      instanceId: trial.instanceId,
+      phase: trial.phase,
+      condition: trial.condition,
+      shownXaiType: trial.shownXaiType,
+      datasetId: trial.datasetId,
+      explanationType: trial.explanationType,
+      xaiType: trial.xaiType,
+      testedWithXai: trial.testedWithXai,
+      xaiProperty: trial.xaiProperty,
+    });
+  })();
+
+  return (
+    <div className="mx-auto w-full max-w-3xl px-6 py-10">
       <h1 className="text-2xl font-semibold tracking-tight">Results & report</h1>
-      <p className="mt-1 text-sm text-neutral-500">Run the experiment, then analyse results and generate a report here.</p>
+      <p className="mt-1 text-sm text-neutral-500">Run the experiment on the study server, then review the results, CSV and plots it returns.</p>
 
       <div className="mt-6 rounded-xl border border-neutral-200 p-4" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
         <div className="flex flex-wrap items-center gap-3">
           <button
             onClick={run}
-            disabled={status === "running"}
+            disabled={status === "running" || !ready}
+            title={ready ? undefined : "Finish the design first"}
             className="inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50"
             style={{ backgroundColor: ACCENT }}
           >
             <Play className="h-4 w-4" /> {status === "running" ? "Running…" : "Run experiment"}
           </button>
-          {status === "done" ? <span className="text-sm text-neutral-500">Run complete (placeholder).</span> : null}
+          {status === "running" ? (
+            <Button variant="outline" size="sm" onClick={cancel}>Cancel</Button>
+          ) : null}
+          <button onClick={() => setShowSettings((s) => !s)} className="ml-auto text-xs text-neutral-400 hover:text-neutral-600">
+            Server settings
+          </button>
         </div>
-        <p className="mt-2 text-xs text-neutral-400">Runs the configured user model / proxies against the design. Execution is a placeholder for now.</p>
+
+        {showSettings ? (
+          <div className="mt-3 space-y-2 rounded-lg border border-neutral-200 bg-neutral-50/60 p-3">
+            <label className="block text-xs font-medium text-neutral-600">Study server URL</label>
+            <TextInput value={baseUrl} onChange={saveBaseUrl} placeholder={DEFAULT_API_BASE} />
+            <label className="block text-xs font-medium text-neutral-600">Bearer token (only if XAIKIT_API_TOKEN is set)</label>
+            <TextInput value={token} onChange={saveToken} placeholder="leave empty for an unauthenticated server" type="password" />
+            <p className="text-xs text-neutral-400">Stored in this browser only — never part of the design or its exports.</p>
+          </div>
+        ) : null}
+
+        <p className="mt-2 text-xs text-neutral-400">
+          Sends the finalized design to <span className="font-medium text-neutral-500">{baseUrl}</span>, then runs dataset → trials → explanations → simulate.
+          Runner: <span className="font-medium text-neutral-500">{framework}</span>. Nothing is sent until you press Run.
+        </p>
+
+        {!ready ? (
+          <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            Finish the design before running — still incomplete: {incomplete.map((p) => p.navTitle).join(", ")}.
+          </p>
+        ) : null}
+        {cogWarning ? (
+          <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{cogWarning}</p>
+        ) : null}
+        {error ? (
+          <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>
+        ) : null}
       </div>
+
+      {stages.length ? (
+        <div className="mt-6 rounded-xl border border-neutral-200 p-4" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Run progress</p>
+          </div>
+          <ol className="space-y-1.5">
+            {stages.map((s) => (
+              <li key={s.stage} className="text-sm">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={cn(
+                      "grid h-4 w-4 shrink-0 place-items-center rounded-full text-[9px]",
+                      s.status === "succeeded" ? "text-white"
+                        : s.status === "failed" ? "bg-red-500 text-white"
+                          : s.status === "running" ? "border-2 border-neutral-300 border-t-neutral-500 animate-spin"
+                            : "border border-neutral-300"
+                    )}
+                    style={s.status === "succeeded" ? { backgroundColor: ACCENT } : undefined}
+                  >
+                    {s.status === "succeeded" ? <Check className="h-2.5 w-2.5" /> : null}
+                  </span>
+                  <span className={cn(s.status === "pending" ? "text-neutral-400" : "text-neutral-800")}>{s.label}</span>
+                  {typeof s.elapsed === "number" ? <span className="text-xs text-neutral-400">{s.elapsed.toFixed(0)}s</span> : null}
+                </div>
+                {s.error ? <p className="ml-6 mt-0.5 text-xs text-red-600">{s.error}</p> : null}
+                {s.status === "running" && s.log ? (
+                  <pre className="ml-6 mt-1 max-h-28 overflow-auto whitespace-pre-wrap rounded bg-neutral-50 p-2 text-[11px] leading-relaxed text-neutral-500">{s.log.slice(-1200)}</pre>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
 
       <div className="mt-6">
         <div className="mb-2 flex items-center justify-between">
           <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Analysis &amp; report</p>
-          <Button variant="outline" size="sm" onClick={() => setNote("Report export is a placeholder for now — run the experiment first.")}>
-            <Download className="mr-1 h-4 w-4" /> Export report
-          </Button>
+          {studyId ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => downloadResultsCsv(cfg, studyId).catch((e) => setNote(e.message))}
+            >
+              <Download className="mr-1 h-4 w-4" /> Results CSV
+            </Button>
+          ) : null}
         </div>
-        {note ? <p className="mb-2 text-xs text-neutral-400">{note}</p> : null}
-        <div className="grid min-h-[280px] place-items-center rounded-xl border border-dashed border-neutral-300 bg-neutral-50/50 p-6 text-center">
-          <div>
-            <BarChart3 className="mx-auto h-8 w-8 text-neutral-300" />
-            <p className="mt-2 text-sm font-medium text-neutral-500">No results yet</p>
-            <p className="mt-1 text-xs text-neutral-400">After a run, analysis and the generated report will appear here.</p>
+        {note ? <p className="mb-2 text-xs text-red-600">{note}</p> : null}
+
+        {rows.length || pngs.length ? (
+          <div className="space-y-4" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+            <div>
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">
+                  {resultView === "trial" ? "Trial by trial" : "Overall"}
+                </p>
+
+                {/* Trial-scoped controls only make sense in the trial view. */}
+                {resultView === "trial" ? (
+                  <>
+                    {/* Always shown, even with a single condition, so it never
+                        looks like the control vanished. */}
+                    {conditions.length ? (
+                      <select
+                        value={activeCond}
+                        onChange={(ev) => { setCond(ev.target.value); setPid(""); setTrialIdx(0); }}
+                        className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs outline-none focus:border-neutral-400"
+                        aria-label="Condition"
+                      >
+                        {conditions.map((c) => (<option key={c} value={c}>{c}</option>))}
+                      </select>
+                    ) : null}
+                    {participantIds.length ? (
+                      <select
+                        value={activePid}
+                        onChange={(ev) => { setPid(ev.target.value); setTrialIdx(0); }}
+                        className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs outline-none focus:border-neutral-400"
+                        aria-label="Participant"
+                      >
+                        {participantIds.map((id) => (<option key={id} value={id}>Participant {id}</option>))}
+                      </select>
+                    ) : null}
+                    {pViews.length ? <span className="text-xs text-neutral-400">trial {trialAt + 1} of {pViews.length}</span> : null}
+                  </>
+                ) : null}
+
+                <div className="ml-auto flex items-center gap-2">
+                  {resultView === "trial" && pViews.length ? (
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setTrialIdx(Math.max(0, trialAt - 1))}
+                        disabled={trialAt <= 0}
+                        className="rounded-md border border-neutral-200 p-1 text-neutral-500 disabled:opacity-40 hover:bg-neutral-50"
+                        aria-label="Previous trial"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTrialIdx(Math.min(pViews.length - 1, trialAt + 1))}
+                        disabled={trialAt >= pViews.length - 1}
+                        className="rounded-md border border-neutral-200 p-1 text-neutral-500 disabled:opacity-40 hover:bg-neutral-50"
+                        aria-label="Next trial"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ) : null}
+                  <div className="flex overflow-hidden rounded-md border border-neutral-200">
+                    {(["trial", "overall"] as const).map((k) => {
+                      const on = resultView === k;
+                      return (
+                        <button
+                          key={k}
+                          type="button"
+                          onClick={() => setResultView(k)}
+                          className={cn("px-2.5 py-1 text-xs font-medium capitalize transition-colors", on ? "text-white" : "bg-white text-neutral-500 hover:bg-neutral-50")}
+                          style={on ? { backgroundColor: ACCENT } : undefined}
+                        >
+                          {k}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {resultView === "trial" ? (
+                trial ? (
+                  <TrialPreview view={trial} caseNumber={trialAt + 1} url={trialUrl} />
+                ) : (
+                  <div className="grid min-h-[220px] place-items-center rounded-xl border border-dashed border-neutral-300 bg-neutral-50/50 p-6 text-center">
+                    <p className="text-xs text-neutral-400">No trials in this selection.</p>
+                  </div>
+                )
+              ) : (
+                <div className="space-y-4">
+                  {pngs.length ? (
+                    // Sized and centred like the apparatus preview; two-up once
+                    // the server returns more than one figure.
+                    <div className={cn("grid gap-3", pngs.length > 1 ? "sm:grid-cols-2" : "")}>
+                      {pngs.map((src, i) => (
+                        <div key={i} className="overflow-hidden rounded-xl border border-neutral-200 bg-white p-2">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={src}
+                            alt={`Overall results plot ${i + 1} rendered by the study server`}
+                            className="mx-auto block h-auto w-full max-w-[420px]"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="grid min-h-[220px] place-items-center rounded-xl border border-dashed border-neutral-300 bg-neutral-50/50 p-6 text-center">
+                      <p className="max-w-sm text-xs text-neutral-400">No overall plot came back from the server for this run.</p>
+                    </div>
+                  )}
+
+                  {analysisTables.length ? (
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Statistical analysis</p>
+                      {analysisTables.map((t, i) => (<StatTable key={i} table={t} />))}
+                    </div>
+                  ) : null}
+
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Pairwise comparisons</p>
+                      {dvOptions.length > 1 ? (
+                        <select
+                          value={activeDv}
+                          onChange={(ev) => setDv(ev.target.value)}
+                          className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs outline-none focus:border-neutral-400"
+                          aria-label="Dependent variable"
+                        >
+                          {dvOptions.map((d) => (<option key={d} value={d}>{d}</option>))}
+                        </select>
+                      ) : activeDv ? <span className="text-xs text-neutral-400">{activeDv}</span> : null}
+                    </div>
+                    {posthocErr ? (
+                      <p className="text-xs text-amber-700">{posthocErr}</p>
+                    ) : posthocTables.length ? (
+                      posthocTables.map((t, i) => (<StatTable key={i} table={t} />))
+                    ) : (
+                      <p className="text-xs text-neutral-400">{activeDv ? "Loading pairwise comparisons…" : "Set a dependent variable on the Study Design page to see pairwise comparisons."}</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* The raw rows are downloaded, not rendered — a run is thousands of
+                them, and the trial viewer above is the readable form. */}
+            {rows.length ? (
+              <p className="text-xs text-neutral-400">
+                {rows.length} row{rows.length === 1 ? "" : "s"} · {participantIds.length} participant{participantIds.length === 1 ? "" : "s"} in {activeCond || "this run"} — use Results CSV for the full data.
+              </p>
+            ) : null}
           </div>
-        </div>
+        ) : (
+          <div className="grid min-h-[280px] place-items-center rounded-xl border border-dashed border-neutral-300 bg-neutral-50/50 p-6 text-center">
+            <div>
+              <BarChart3 className="mx-auto h-8 w-8 text-neutral-300" />
+              <p className="mt-2 text-sm font-medium text-neutral-500">No results yet</p>
+              <p className="mt-1 text-xs text-neutral-400">After a run, the results table, plots and analysis from the server appear here.</p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

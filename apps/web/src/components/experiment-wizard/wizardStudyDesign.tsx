@@ -10,6 +10,7 @@ import {
   participantGroups, withinCoverage, unsupportedIvLevels, ivFactorUnsupportedByAgent,
   DATASET_OPTIONS, DV_CATALOG, DV_GROUP_ORDER, DvEntry, parseDvs, Variable, parseVars,
   ivAgentFor, cogParamType, cogParamRange,
+  trialSplit, DEFAULT_TRAINING_TRIALS, DEFAULT_TESTING_TRIALS,
 } from "./questions";
 
 export function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
@@ -65,7 +66,8 @@ export function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setA
             const per = parseInt(a.sd_participants || "", 10) || 0;
             const between = betweenCells(ivs);
             const totalP = per * (between || 1);
-            const trials = parseInt(a.sd_trials || "10", 10) || 10;
+            const split = trialSplit(a);
+            const trials = split.total;
             const totalTrials = totalP * trials;
             return (
               <>
@@ -76,12 +78,14 @@ export function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setA
                 </p>
                 <p className="text-[15px] leading-8 text-neutral-800">
                   Each participant completes{" "}
-                  <input type="number" value={a.sd_trials ?? "10"} onChange={(e) => setAnswer("sd_trials", e.target.value)} placeholder="10" className={numCls} />{" "}
-                  trials.
+                  <input type="number" min={0} value={a.sd_trials_training ?? String(split.training)} onChange={(e) => setAnswer("sd_trials_training", e.target.value)} placeholder={String(DEFAULT_TRAINING_TRIALS)} className={numCls} />{" "}
+                  training trials and{" "}
+                  <input type="number" min={0} value={a.sd_trials_testing ?? String(split.testing)} onChange={(e) => setAnswer("sd_trials_testing", e.target.value)} placeholder={String(DEFAULT_TESTING_TRIALS)} className={numCls} />{" "}
+                  testing trials.
                 </p>
                 <div className="mt-2 rounded-lg bg-neutral-50 px-3 py-2 text-sm text-neutral-600" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
                   <div><span className="text-neutral-400">Total participants:</span> <span className="font-medium text-neutral-800">{totalP}</span> ({per} × {between || 1} between-subjects group{between === 1 ? "" : "s"}, {cells} cell{cells === 1 ? "" : "s"})</div>
-                  <div><span className="text-neutral-400">Total trials:</span> <span className="font-medium text-neutral-800">{totalTrials}</span> ({totalP} × {trials})</div>
+                  <div><span className="text-neutral-400">Total trials:</span> <span className="font-medium text-neutral-800">{totalTrials}</span> ({totalP} × {trials} = {split.training} training + {split.testing} testing)</div>
                 </div>
                 {check ? <p className={cn("mt-2 text-sm", checkColor)} style={{ fontFamily: "ui-sans-serif, system-ui" }}>{check.message}</p> : null}
 

@@ -868,14 +868,38 @@ export function cogParamsSummaryLines(a: Answers): string[] {
   });
 }
 
+export const DEFAULT_TRAINING_TRIALS = 10;
+export const DEFAULT_TESTING_TRIALS = 20;
+
+// Trials per participant, split into the training (feedback shown) and testing
+// phases. Designs saved before the split carry a single sd_trials total; those
+// are reported as all-testing so their totals stay unchanged.
+export function trialSplit(a: Answers): { training: number; testing: number; total: number } {
+  const num = (s: string | undefined) => {
+    const n = parseInt((s ?? "").trim(), 10);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  };
+  const training = num(a.sd_trials_training);
+  const testing = num(a.sd_trials_testing);
+  if (training !== null || testing !== null) {
+    const tr = training ?? DEFAULT_TRAINING_TRIALS;
+    const te = testing ?? DEFAULT_TESTING_TRIALS;
+    return { training: tr, testing: te, total: tr + te };
+  }
+  const legacy = num(a.sd_trials);
+  if (legacy !== null) return { training: 0, testing: legacy, total: legacy };
+  return { training: DEFAULT_TRAINING_TRIALS, testing: DEFAULT_TESTING_TRIALS, total: DEFAULT_TRAINING_TRIALS + DEFAULT_TESTING_TRIALS };
+}
+
 export function participantTotals(a: Answers) {
   const ivs = parseIvs(a);
   const per = parseInt(a.sd_participants || "", 10) || 0;
   const between = betweenCells(ivs) || 1;
   const cells = totalCells(ivs);
   const totalP = per * between;
-  const trials = parseInt(a.sd_trials || "10", 10) || 10;
-  return { per, between, cells, totalP, trials, totalTrials: totalP * trials };
+  const split = trialSplit(a);
+  const trials = split.total;
+  return { per, between, cells, totalP, trials, training: split.training, testing: split.testing, totalTrials: totalP * trials };
 }
 
 // ---- Apparatus configurations (saved per condition/group) ----
@@ -1043,6 +1067,41 @@ export function instanceRangeFor(p: Record<string, string>): { min: number; max:
   return { min: 0, max: ds ? ds.localMax : 299 };
 }
 
+// Default train/test split for a Sim2Real (XAI Property) apparatus: the first
+// SIM2REAL_TRAIN_COUNT instances train, every remaining one tests (0-9 and
+// 10-38 over its 0–38 corpus). Derived from the range so it stays correct if
+// the corpus size changes.
+export const SIM2REAL_TRAIN_COUNT = 10;
+
+export function defaultSim2realInstanceIds(): { trainingInstanceIds: string; instanceIds: string } {
+  const { min, max } = instanceRangeFor({ appId: "adult_sim2real" });
+  const trainEnd = Math.min(min + SIM2REAL_TRAIN_COUNT - 1, max);
+  return {
+    trainingInstanceIds: `${min}-${trainEnd}`,
+    instanceIds: trainEnd < max ? `${trainEnd + 1}-${max}` : "",
+  };
+}
+
+// What is left for the test set once the training instances are taken: the
+// configured range narrowed past any training ids at either end, how many ids
+// are spoken for, and any id used in BOTH lists (which would test a participant
+// on an instance they already practised).
+export function testInstanceHint(p: Record<string, string>): {
+  min: number;
+  max: number;
+  reserved: number;
+  overlap: string[];
+} {
+  const range = instanceRangeFor(p);
+  const train = new Set(trainingInstanceIdsOf(p));
+  let min = range.min;
+  while (min <= range.max && train.has(String(min))) min++;
+  let max = range.max;
+  while (max >= min && train.has(String(max))) max--;
+  const overlap = instanceIdsOf(p).filter((id) => train.has(id));
+  return { min, max, reserved: train.size, overlap };
+}
+
 // NOTE: expMethod is intentionally NOT defaulted here — its default depends on the
 // namespace (local → SHAP, sim2real → LIME) and is resolved in buildStudyUrl / the UI.
 export const STUDY_PARAM_DEFAULTS: Record<string, string> = {
@@ -1136,6 +1195,129 @@ export function normalizeApparatusList(arr: any): ApparatusEntry[] {
 }
 export function parseApparatusList(a: Answers): ApparatusEntry[] {
   try { return normalizeApparatusList(JSON.parse(a.apparatus_list || "[]")); } catch { return []; }
+}
+
+// ---- Replaying a simulated trial on the study interface ----
+
+// One simulated result row, reduced to what picking an interface URL needs.
+export interface TrialUrlSpec {
+  instanceId: string;
+  phase: string; // "training" | "testing"
+  condition: string; // condition_name / withinCondition
+  shownXaiType: string; // the condition's explanation type (never "none")
+  datasetId: string; // dataId
+  explanationType?: string; // explanation_type: "dt" / "lr" / "none"
+  xaiType?: string; // the condition's assigned type, as a fallback
+  testedWithXai?: boolean | null; // tested_w_xai — testing rows only
+  xaiProperty?: string; // Sim2Real: faithful / sparse / robust / sparse_robust
+}
+
+// The apparatus config a trial was run under: the one whose group matches the
+// trial's condition, else the "All participants" entry, else the only one.
+export function apparatusForTrial(entries: ApparatusEntry[], t: { condition: string }): ApparatusEntry | undefined {
+  if (entries.length <= 1) return entries[0];
+  const want = slugId(t.condition);
+  if (want) {
+    const hit = entries.find((e) => {
+      const g = e.group || "";
+      // Groups read like "XAI Type = Decision Tree" — compare on the level.
+      const level = g.includes("=") ? g.split("=").slice(1).join("=") : g;
+      return slugId(level) === want || slugId(g) === want;
+    });
+    if (hit) return hit;
+  }
+  return entries.find((e) => !e.group || e.group === "All participants") ?? entries[0];
+}
+
+/**
+ * Did this trial actually show an explanation?
+ *
+ * `tested_w_xai` is the authoritative flag but only exists on TESTING rows —
+ * training trials always show the explanation, so it is null there.
+ * `explanation_type` backs it up: "none" when no explanation was rendered,
+ * "dt"/"lr" otherwise, on both phases.
+ *
+ * `shown_xai_type` is NOT usable for this: it names the condition's explanation
+ * type and stays "decision_tree"/"logistic_regression" even on a without-XAI
+ * trial.
+ */
+export function trialShowedXai(t: { testedWithXai?: boolean | null; explanationType?: string; shownXaiType?: string }): boolean {
+  if (typeof t.testedWithXai === "boolean") return t.testedWithXai;
+  const e = (t.explanationType || "").trim().toLowerCase();
+  if (e) return e !== "none";
+  // CoAX rows carry no explanation_type, and their "None" condition shows up as
+  // shown_xai_type "none" — the only signal left, so it is trusted last.
+  const s = (t.shownXaiType || "").trim().toLowerCase();
+  if (s) return s !== "none";
+  return true;
+}
+
+// A result row names its explanation in the runner's vocabulary
+// (shown_xai_type "decision_tree", explanation_type "dt"); the interface needs
+// an EXPLANATION_FORMS id. "" when the row says nothing recognisable, in which
+// case the apparatus config's own form stands.
+const ROW_FORM_IDS: Record<string, string> = {
+  decision_tree: "DT", dt: "DT", tree: "DT",
+  logistic_regression: "LR", lr: "LR", weights: "LR", logreg: "LR",
+  attribution: "attribution", attributions: "attribution", local: "attribution",
+  importance: "importance", feature_importance: "importance",
+};
+
+export function trialFormId(t: { shownXaiType?: string; explanationType?: string; xaiType?: string }): string {
+  // explanation_type first — it is what was actually rendered. On a without-XAI
+  // trial it reads "none", which maps to nothing and falls through to the
+  // condition's type, so the right renderer is still chosen with XAI hidden.
+  for (const raw of [t.explanationType, t.shownXaiType, t.xaiType]) {
+    const v = (raw || "").trim().toLowerCase();
+    if (v && ROW_FORM_IDS[v]) return ROW_FORM_IDS[v];
+  }
+  return "";
+}
+
+/**
+ * The study-interface URL that replays one simulated trial.
+ *
+ * Everything the user configured on the Apparatus page (form, method, widgets,
+ * LR/DT settings) is kept; only what the row dictates is overridden — the
+ * instance, whether it was a training trial, and whether XAI was shown. That is
+ * why this starts from the apparatus entry instead of rebuilding params from
+ * result columns.
+ */
+export function trialStudyUrl(root: string, entry: ApparatusEntry | undefined, t: TrialUrlSpec): string {
+  const base: Record<string, string> = { ...STUDY_PARAM_DEFAULTS, ...(entry?.params ?? {}) };
+  // A Sim2Real row names the property it showed, and that screen only exists
+  // under adult_sim2real — its dataId says "adult", which would otherwise point
+  // at the local renderer.
+  const property = EXPLANATION_PROPERTIES.includes((t.xaiProperty || "").trim()) ? (t.xaiProperty as string).trim() : "";
+  if (property && !entry?.params?.appId) base.appId = "adult_sim2real";
+  else if (t.datasetId && !entry?.params?.appId) base.appId = t.datasetId;
+  const p: Record<string, string> = {
+    ...base,
+    instanceId: t.instanceId,
+    trainingMode: t.phase === "training" ? "1" : "0",
+  };
+  // The row decides which explanation was actually shown, not the apparatus
+  // config: a design that varies XAI Type runs several forms through one
+  // config, so trusting the config would render LR weights for a DT trial.
+  // namespaceOf() follows the form, so this also picks the right renderer.
+  const rowForm = trialFormId(t);
+  if (rowForm) p.form = rowForm;
+  // Sim2Real reuses expMethod to carry the property condition, and it changes
+  // per trial — the apparatus config would pin every trial to one property.
+  if (property) p.expMethod = property;
+  // The element list drives what the existing builder emits, so the two things a
+  // trial dictates are expressed here rather than by changing buildStudyUrl:
+  //   - a without-XAI trial drops "xai" so the explanation is hidden;
+  //   - a TEST trial drops "prediction", because revealing the AI's answer is
+  //     feedback and belongs to training only. An empty element list means
+  //     "show everything", so it is seeded from the defaults before filtering.
+  const training = t.phase === "training";
+  const showXai = trialShowedXai(t);
+  if (!showXai || !training) {
+    const els = elementsOf(base).filter((k) => (showXai || k !== "xai") && (training || k !== "prediction"));
+    p.elements = els.length ? els.join(",") : "instance";
+  }
+  return buildStudyUrl(root, p);
 }
 
 // ---- Participant groups (the actual between-subjects cells) ----

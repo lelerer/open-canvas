@@ -81,7 +81,7 @@ Field ids you can fill or modify (anywhere in the form):
 - sd_cv — control variables. One item: { "name": "…", "type": "…" }. type is free text; common: Numerical (continuous), Categorical (nominal), Ordinal, Binary, Count. Edit with ops.
 - sd_rv — random variables (same item shape as sd_cv). Edit with ops.
 - sd_participants (number string) — participants per condition
-- sd_trials (number string) — trials per participant (default 10)
+- sd_trials_training and sd_trials_testing (number strings) — trials per participant, split into the training phase (feedback shown, default 10) and the testing phase (default 20). Their sum is the trials-per-participant total; set both when the user gives a total.
 - ds_dataset (text) — dataset name (e.g. "Adult Income", "Wine Quality"), if the user states one
 - apparatus_list (ARRAY) — one or more interface configurations, each assigned to a group of participants. Prefer incremental ops (add/update/remove one entry, matched by label or group). Each entry: { "label": "…", "group": "All participants" or "<IV factor> = <level>" (e.g. "XAI Type = Importance"), "mode": "ours" | "own", "params": {…} for "ours", or "url" (full https:// link) for "own" }.
   params for "ours" (in an update op, send only the params you're changing — they're merged in):
