@@ -586,6 +586,75 @@ export function pngDataUri(plot: PlotResponse | undefined): string | null {
   return pngDataUris(plot)[0] ?? null;
 }
 
+/* ------------------------- human comparison ------------------------------ */
+
+export type HumanComparisonStudy = "coax" | "coxam" | "sim2real";
+
+export interface HumanComparisonPanel {
+  section?: string;
+  title?: string;
+  subtitle?: string;
+  role?: string;
+  [k: string]: unknown;
+}
+
+export interface HumanComparisonCell {
+  nll_mean: number;
+  nll_sd?: number | null;
+  bic_mean?: number | null;
+  bic_sd?: number | null;
+  n?: number | null;
+  [k: string]: unknown;
+}
+
+export interface HumanComparisonModel {
+  name: string;
+  label: string;
+  is_target?: boolean;
+  cells: Record<string, HumanComparisonCell | null | undefined>;
+  [k: string]: unknown;
+}
+
+export interface HumanComparisonTable {
+  title: string;
+  facets: string[];
+  models: HumanComparisonModel[];
+  note?: string;
+  [k: string]: unknown;
+}
+
+export interface HumanComparisonFitStats {
+  name?: string;
+  facets: string[];
+  models: HumanComparisonModel[];
+  note?: string;
+  [k: string]: unknown;
+}
+
+export interface HumanComparisonResponse {
+  study?: HumanComparisonStudy | string;
+  plot_png: string;
+  panels?: {
+    task?: string;
+    panels?: HumanComparisonPanel[];
+    [k: string]: unknown;
+  };
+  fit_stats: HumanComparisonFitStats | null;
+  [k: string]: unknown;
+}
+
+export function humanComparisonStudyFor(userModel: string, hasXaiPropertyIv: boolean): HumanComparisonStudy | null {
+  const framework = frameworkFor(userModel, hasXaiPropertyIv);
+  return framework === "coax" || framework === "coxam" || framework === "sim2real" ? framework : null;
+}
+
+export async function getHumanComparison(
+  cfg: ApiConfig,
+  study: HumanComparisonStudy
+): Promise<HumanComparisonResponse> {
+  return request(cfg, `/api/human-comparison/${encodeURIComponent(study)}`);
+}
+
 /* ------------------------------ trial view ------------------------------- */
 
 // One trial as the trial-by-trial renderer needs it. The explanation preview is

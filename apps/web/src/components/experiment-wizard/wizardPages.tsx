@@ -5,7 +5,7 @@ import { Upload, Plus, X, Wand2, ChevronLeft, ChevronRight, Play, BarChart3, Che
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { ACCENT, InfoTip, DocLabel, TextInput } from "./wizardUi";
+import { ACCENT, InfoTip, TextInput } from "./wizardUi";
 import {
   Page, PAGES, isPageComplete, Answers, parseIvs, parseDvs, dvDisplayName, parseProcSteps, ProcStep, PROC_STEP_TYPES,
   USER_MODELS, UserModel, parseIdList, cognitiveParamsFor, CognitiveParam,
@@ -27,6 +27,7 @@ import {
   TrialView, trialViewOf, runPostHoc, tablesFrom, formatCell, SimpleTable,
   dvColumnsOf, matchDvColumn, getAllResults, runAnalysis, plotGrid,
   dvCoercionWarnings, plotInteraction, ivColumnsOf,
+  getHumanComparison, humanComparisonStudyFor, HumanComparisonResponse,
 } from "./server";
 
 // Re-exported for backward compatibility with existing imports of these from this module.
@@ -992,6 +993,100 @@ function StatTable({ table }: { table: SimpleTable }) {
   );
 }
 
+function HumanComparisonTableView({ table }: { table: HumanComparisonResponse["fit_stats"]["tables"][number] }) {
+  const formatFit = (cell: HumanComparisonResponse["fit_stats"]["tables"][number]["models"][number]["cells"][string]) => {
+    if (!cell || typeof cell.nll_mean !== "number") return "—";
+    const mean = cell.nll_mean.toFixed(2);
+    return typeof cell.nll_sd === "number" ? `${mean} ± ${cell.nll_sd.toFixed(2)}` : mean;
+  };
+
+  return (
+    <div className="rounded-xl border border-neutral-200">
+      <div className="border-b border-neutral-100 px-3 py-2">
+        <h4 className="text-sm font-medium text-neutral-800">{table.title}</h4>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-xs">
+          <thead className="text-neutral-400">
+            <tr>
+              <th className="whitespace-nowrap px-3 py-1.5 font-medium">Model</th>
+              {table.facets.map((f) => (
+                <th key={f} className="whitespace-nowrap px-3 py-1.5 font-medium">{f}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="text-neutral-700">
+            {table.models.map((m) => (
+              <tr key={m.name} className={cn("border-t border-neutral-100", m.is_target ? "bg-emerald-50/60" : "")}>
+                <td className="whitespace-nowrap px-3 py-1.5 font-medium">{m.label}</td>
+                {table.facets.map((f) => (
+                  <td key={f} className="whitespace-nowrap px-3 py-1.5 font-mono">{formatFit(m.cells[f])}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function HumanComparisonPanelView({
+  data,
+  study,
+  loading,
+  error,
+}: {
+  data: HumanComparisonResponse | null;
+  study: string;
+  loading: boolean;
+  error: string;
+}) {
+  const plotSrc = data
+    ? data.plot_png.startsWith("data:")
+      ? data.plot_png
+      : `data:image/png;base64,${data.plot_png}`
+    : "";
+
+  return (
+    <div className="space-y-4" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Published comparison</p>
+        <span className="rounded-md border border-neutral-200 px-2 py-1 text-xs text-neutral-500">{study}</span>
+      </div>
+
+      {loading ? <p className="text-xs text-neutral-400">Loading published comparison…</p> : null}
+      {error ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p> : null}
+
+      {data ? (
+        <>
+          <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white p-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={plotSrc}
+              alt={data.panels?.task || "Human vs Virtual comparison plot"}
+              className="mx-auto block h-auto w-full max-w-full"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">
+              {data.fit_stats.name || "Fit statistics"}
+            </p>
+            {data.fit_stats.tables.map((table) => (
+              <HumanComparisonTableView key={table.title} table={table} />
+            ))}
+          </div>
+        </>
+      ) : !loading && !error ? (
+        <div className="grid min-h-[220px] place-items-center rounded-xl border border-dashed border-neutral-300 bg-neutral-50/50 p-6 text-center">
+          <p className="max-w-sm text-xs text-neutral-400">No human-comparison payload has been loaded yet.</p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // A finished run's outcome (rows/analysis/plot) is cached here, keyed by study
 // id, so leaving Results & Report and coming back still shows it without a
 // re-run or a server round trip. Kept in its own key (not folded into the
@@ -1043,7 +1138,7 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
   const [trialIdx, setTrialIdx] = useState(0);
   const [pid, setPid] = useState("");
   const [cond, setCond] = useState("");
-  const [resultView, setResultView] = useState<"trial" | "overall">("trial");
+  const [resultView, setResultView] = useState<"trial" | "overall" | "human">("trial");
   const [dv, setDv] = useState("");
   const [posthoc, setPosthoc] = useState<unknown>(null);
   const [posthocErr, setPosthocErr] = useState("");
@@ -1052,6 +1147,10 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
   const [hueIv, setHueIv] = useState("");
   const [interactionPlot, setInteractionPlot] = useState<string | null>(null);
   const [interactionErr, setInteractionErr] = useState("");
+  const [humanComparison, setHumanComparison] = useState<HumanComparisonResponse | null>(null);
+  const [humanComparisonStudy, setHumanComparisonStudy] = useState("");
+  const [humanComparisonLoading, setHumanComparisonLoading] = useState(false);
+  const [humanComparisonErr, setHumanComparisonErr] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   // Whether THIS mount is the one that clicked Run (owns abortRef/the live
   // promise) vs. inherited "running" from a previous mount via persisted
@@ -1156,6 +1255,7 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
     parseCogConfig(a),
     mode
   );
+  const comparisonStudy = humanComparisonStudyFor(a.user_model || "", hasXaiPropertyIv(a));
 
   async function run() {
     if (!ready || status === "running") return;
@@ -1215,6 +1315,30 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
     // ever seeing results (or if the original run genuinely died).
     setAnswer("run_status", "failed");
     setError("Stopped watching this run — it may still be executing on the server, this page just isn't tracking it anymore.");
+  }
+
+  async function openHumanComparison() {
+    if (!comparisonStudy) {
+      setHumanComparisonErr("Pick CoAX, CoXAM, or Sim2Real on the User Model page before opening the human comparison.");
+      setHumanComparison(null);
+      setHumanComparisonStudy("");
+      setResultView("human");
+      return;
+    }
+    setResultView("human");
+    setHumanComparisonStudy(comparisonStudy);
+    setHumanComparisonErr("");
+    if (humanComparison && humanComparisonStudy === comparisonStudy) return;
+    setHumanComparisonLoading(true);
+    try {
+      const data = await getHumanComparison(cfg, comparisonStudy);
+      setHumanComparison(data);
+    } catch (e) {
+      setHumanComparison(null);
+      setHumanComparisonErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setHumanComparisonLoading(false);
+    }
   }
 
   const studyId = outcome?.studyId || a.run_study_id || "";
@@ -1326,6 +1450,21 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
           {status === "running" ? (
             <Button variant="outline" size="sm" onClick={cancel}>Cancel</Button>
           ) : null}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (resultView === "human") {
+                setResultView(rows.length || pngs.length ? "overall" : "trial");
+                return;
+              }
+              openHumanComparison();
+            }}
+            title={comparisonStudy ? undefined : "Pick CoAX, CoXAM, or Sim2Real on the User Model page first"}
+          >
+            <User className="mr-1 h-4 w-4" /> Human vs Virtual
+          </Button>
         </div>
 
         <p className="mt-2 text-xs text-neutral-400">
@@ -1343,7 +1482,7 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
         ) : null}
         {restoring ? (
           <p className="mt-2 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-500">
-            Loading your previous run's results…
+            Loading your previous run&apos;s results…
           </p>
         ) : null}
         {cogWarning ? (
@@ -1403,12 +1542,12 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
         </div>
         {note ? <p className="mb-2 text-xs text-red-600">{note}</p> : null}
 
-        {rows.length || pngs.length ? (
+        {rows.length || pngs.length || resultView === "human" ? (
           <div className="space-y-4" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
             <div>
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">
-                  {resultView === "trial" ? "Trial by trial" : "Overall"}
+                  {resultView === "trial" ? "Trial by trial" : resultView === "overall" ? "Overall" : "Human vs Virtual"}
                 </p>
 
                 {/* Trial-scoped controls only make sense in the trial view. */}
@@ -1482,7 +1621,14 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
                 </div>
               </div>
 
-              {resultView === "trial" ? (
+              {resultView === "human" ? (
+                <HumanComparisonPanelView
+                  data={humanComparison}
+                  study={humanComparisonStudy || comparisonStudy || "not selected"}
+                  loading={humanComparisonLoading}
+                  error={humanComparisonErr}
+                />
+              ) : resultView === "trial" ? (
                 trial ? (
                   <TrialPreview view={trial} caseNumber={trialAt + 1} url={trialUrl} />
                 ) : (
