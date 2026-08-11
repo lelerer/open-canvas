@@ -67,7 +67,7 @@ export const COAX_XAI_PROPERTY = "CoAX (XAI Property)";
 
 export const USER_MODELS: UserModel[] = [
   { id: "CoAX", name: "CoAX", full: "Interpreting Attribution XAI", description: "A cognitive user model of how people interpret attribution-based explanations (e.g. LIME / SHAP feature attributions).", category: "Cognitive model" },
-  { id: COAX_XAI_PROPERTY, name: "CoAX", full: "Interpreting XAI with Different Properties", description: "The CoAX model for XAI-Property designs — how people interpret explanations that are faithful, sparse, robust or sparse_robust. Runs on the Sim2Real synthetic-AI interface.", category: "Cognitive model" },
+  { id: COAX_XAI_PROPERTY, name: "Sim2Real", full: "Interpreting XAI with Different Properties", description: "The CoAX model for XAI-Property designs — how people interpret explanations that are faithful, sparse, robust or sparse_robust. Runs on the Sim2Real synthetic-AI interface.", category: "Cognitive model" },
   { id: "CoXAM", name: "CoXAM", full: "Interpreting Global XAI (Rules vs Weights)", description: "A cognitive user model of how people interpret global surrogate explanations — decision-tree rules vs logistic-regression weights.", category: "Cognitive model" },
   // Comparison baselines (simple standard models run alongside for comparison):
   { id: "KNN", name: "KNN", full: "k-Nearest Neighbours", description: "A simple, standard model used as a comparison baseline. Works with both CoAX and CoXAM.", category: "Comparison baseline" },
@@ -1042,7 +1042,7 @@ export function studyNaturalSize(mode: string, params: Record<string, string>): 
 }
 
 export function elementsOf(p: Record<string, string>): string[] {
-  const raw = p.elements != null ? p.elements : p.widgets != null ? p.widgets : "instance,xai,prediction";
+  const raw = p.elements != null ? p.elements : p.widgets != null ? p.widgets : "instance,meters,xai,prediction";
   const els = raw.split(",").map((s) => s.trim()).filter(Boolean).map((k) => (k === "simulation" ? "sliders" : k));
   // "Data instance" is always shown — it cannot be deselected (also repairs
   // older saved configs and chat-set element lists that omitted it).
@@ -1213,19 +1213,41 @@ export interface TrialUrlSpec {
 }
 
 // The apparatus config a trial was run under: the one whose group matches the
-// trial's condition, else the "All participants" entry, else the only one.
-export function apparatusForTrial(entries: ApparatusEntry[], t: { condition: string }): ApparatusEntry | undefined {
+// trial's actual condition/dataset, else the "All participants" entry, else
+// the only one.
+//
+// A group can name more than one between-subjects factor —
+// participantGroups() joins one "Factor = Level" segment per between-subjects
+// IV with " · " (e.g. "Dataset = wine_quality · XAI Type = Decision Tree") —
+// so every segment has to match, not just the group string as a whole; the
+// old single-"=" split only ever worked for a one-factor group and silently
+// fell through to the first/"All participants" entry otherwise. `condition`
+// (built off condition_name/xai_type/withinCondition — see trialViewOf) never
+// encodes dataset, so a "Dataset = …" segment is checked against `datasetId`
+// instead, and everything else against `condition`.
+export function apparatusForTrial(entries: ApparatusEntry[], t: { condition: string; datasetId?: string }): ApparatusEntry | undefined {
   if (entries.length <= 1) return entries[0];
-  const want = slugId(t.condition);
-  if (want) {
-    const hit = entries.find((e) => {
-      const g = e.group || "";
-      // Groups read like "XAI Type = Decision Tree" — compare on the level.
-      const level = g.includes("=") ? g.split("=").slice(1).join("=") : g;
-      return slugId(level) === want || slugId(g) === want;
-    });
-    if (hit) return hit;
+  const wantCondition = slugId(t.condition);
+  const wantDataset = slugId(t.datasetId || "");
+  let best: { e: ApparatusEntry; score: number } | null = null;
+  for (const e of entries) {
+    const g = (e.group || "").trim();
+    if (!g || g === "All participants") continue;
+    const segments = g.split("·").map((seg) => seg.trim()).filter(Boolean);
+    if (!segments.length) continue;
+    let matched = 0;
+    for (const seg of segments) {
+      const eq = seg.indexOf("=");
+      const factor = eq >= 0 ? seg.slice(0, eq).trim() : "";
+      const level = eq >= 0 ? seg.slice(eq + 1).trim() : seg;
+      const want = /dataset/i.test(factor) ? wantDataset : wantCondition;
+      if (want && slugId(level) === want) matched++;
+    }
+    // Every segment of the group must match — a partial match (e.g. right
+    // dataset, wrong XAI type) is the wrong config, not a close-enough one.
+    if (matched === segments.length && (!best || matched > best.score)) best = { e, score: matched };
   }
+  if (best) return best.e;
   return entries.find((e) => !e.group || e.group === "All participants") ?? entries[0];
 }
 

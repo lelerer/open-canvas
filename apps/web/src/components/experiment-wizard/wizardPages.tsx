@@ -25,7 +25,8 @@ import {
   ApiConfig, DEFAULT_API_BASE, API_BASE_KEY, API_TOKEN_KEY, SimulationMode,
   StageProgress, RunOutcome, runStudy, simulateOptionsFor, downloadResultsCsv, pngDataUris,
   TrialView, trialViewOf, runPostHoc, tablesFrom, formatCell, SimpleTable,
-  dvColumnsOf, matchDvColumn,
+  dvColumnsOf, matchDvColumn, getAllResults, runAnalysis, plotGrid,
+  dvCoercionWarnings, plotInteraction,
 } from "./server";
 
 // Re-exported for backward compatibility with existing imports of these from this module.
@@ -830,9 +831,13 @@ function answerColor(v: string): string {
 }
 
 export function TrialPreview({ view, caseNumber, url }: { view: TrialView; caseNumber: number; url?: string }) {
-  // In a forward-simulation design the participant predicts what the AI
-  // predicts, so the AI's own prediction is the reference — "Actual (AI)".
-  // A dataset ground truth is shown as its own row only when the run has one.
+  // Every design here (forward- or counterfactual-simulation, on every agent)
+  // has the participant predict the AI, never the dataset's true label — so
+  // "Actual (AI)" is the only reference that means anything. A dataset ground
+  // truth is deliberately not shown as its own row: some result rows carry a
+  // ground_truth/target/etc. column anyway (left over from the source
+  // dataset), and showing it next to "AI prediction" reads as if it were the
+  // thing being measured, which it isn't.
   const rows: { key: string; label: string; text: string; note?: string; badge: string; icon: ReactNode }[] = [
     {
       key: "sim",
@@ -859,13 +864,6 @@ export function TrialPreview({ view, caseNumber, url }: { view: TrialView; caseN
       note: view.ai?.confidence != null ? `Confidence ${view.ai.confidence.toFixed(0)}%` : undefined,
       badge: "#7c2d12",
       icon: <span className="text-[9px] font-bold leading-none">AI</span>,
-    },
-    {
-      key: "truth",
-      label: "Ground truth",
-      text: view.actual,
-      badge: "#44403c",
-      icon: <Check className="h-4 w-4" />,
     },
   ].filter((r) => r.text !== "");
 
@@ -994,13 +992,47 @@ function StatTable({ table }: { table: SimpleTable }) {
   );
 }
 
+// A finished run's outcome (rows/analysis/plot) is cached here, keyed by study
+// id, so leaving Results & Report and coming back still shows it without a
+// re-run or a server round trip. Kept in its own key (not folded into the
+// `answers` blob) since a plot's PNG and thousands of result rows can be
+// sizeable, and this only ever needs to hold the most recent run — validated
+// against the current `run_study_id` on read so a stale cache (e.g. from a
+// design that was since reset or re-run) is never shown as if it were current.
+const RUN_OUTCOME_KEY = "xaikit-run-outcome-v1";
+
+function loadCachedOutcome(studyId: string): RunOutcome | null {
+  try {
+    const raw = localStorage.getItem(RUN_OUTCOME_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { studyId?: string; outcome?: RunOutcome };
+    return parsed.studyId === studyId && parsed.outcome ? parsed.outcome : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedOutcome(studyId: string, outcome: RunOutcome) {
+  try {
+    localStorage.setItem(RUN_OUTCOME_KEY, JSON.stringify({ studyId, outcome }));
+  } catch {
+    // Quota exceeded or storage unavailable — the run still renders for this
+    // session, it just won't survive a reload.
+  }
+}
+
+// Exported so a wizard reset (a new/discarded design) doesn't leave a stale
+// run's results behind for the next design to accidentally pick up.
+export function clearCachedRunOutcome() {
+  try { localStorage.removeItem(RUN_OUTCOME_KEY); } catch { /* ignore */ }
+}
+
 export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
   const a = answers;
   const status = a.run_status || "idle"; // "idle" | "running" | "done" | "failed"
 
   const [baseUrl, setBaseUrl] = useState(DEFAULT_API_BASE);
   const [token, setToken] = useState("");
-  const [showSettings, setShowSettings] = useState(false);
   // Runs always simulate the whole experiment; the narrower /simulate modes are
   // not exposed here.
   const mode: SimulationMode = "whole_experiment";
@@ -1015,33 +1047,110 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
   const [dv, setDv] = useState("");
   const [posthoc, setPosthoc] = useState<unknown>(null);
   const [posthocErr, setPosthocErr] = useState("");
+  const [restoring, setRestoring] = useState(false);
+  const [xIv, setXIv] = useState("");
+  const [hueIv, setHueIv] = useState("");
+  const [interactionPlot, setInteractionPlot] = useState<string | null>(null);
+  const [interactionErr, setInteractionErr] = useState("");
   const abortRef = useRef<AbortController | null>(null);
+  // Whether THIS mount is the one that clicked Run (owns abortRef/the live
+  // promise) vs. inherited "running" from a previous mount via persisted
+  // answers — see the reconnect-poll effect below.
+  const startedHereRef = useRef(false);
 
   // The server URL and token are machine settings, not part of the design, so
-  // they live in localStorage rather than in the answers.
+  // they live in localStorage rather than in the answers. There's no UI to set
+  // them anymore (kept out of Results & Report on purpose), but this still
+  // picks up a value saved by an earlier build, or set directly in devtools.
   useEffect(() => {
     try {
       setBaseUrl(localStorage.getItem(API_BASE_KEY) || DEFAULT_API_BASE);
       setToken(localStorage.getItem(API_TOKEN_KEY) || "");
     } catch { /* ignore */ }
   }, []);
-  function saveBaseUrl(v: string) {
-    setBaseUrl(v);
-    try { localStorage.setItem(API_BASE_KEY, v); } catch { /* ignore */ }
-  }
-  function saveToken(v: string) {
-    setToken(v);
-    try { localStorage.setItem(API_TOKEN_KEY, v); } catch { /* ignore */ }
-  }
 
   const cfg: ApiConfig = { baseUrl, token };
 
-  // The design is only sent once it is finished — the same completeness check
-  // the sidebar uses, across every page that gates generation.
-  const incomplete = PAGES.filter((p) => p.kind !== "review" && p.kind !== "results" && !isPageComplete(p, a));
+  // A finished run's outcome (rows/analysis/plot) lives only in this component's
+  // state, so leaving the page and coming back would otherwise show a blank
+  // results panel. `run_status`/`run_study_id` do persist (in `answers`), so on
+  // (re)mount after a completed run: try the local cache first (instant, no
+  // network), and only hit the server as a fallback if that cache is missing
+  // (e.g. cleared, or a different browser).
+  useEffect(() => {
+    if (a.run_status !== "done" || !a.run_study_id || outcome) return;
+    const studyId = a.run_study_id;
+
+    const cached = loadCachedOutcome(studyId);
+    if (cached) { setOutcome(cached); return; }
+
+    let cancelled = false;
+    setRestoring(true);
+    setError("");
+    (async () => {
+      try {
+        const [{ rows }, analysis, plot] = await Promise.all([
+          getAllResults(cfg, studyId),
+          runAnalysis(cfg, studyId).catch(() => undefined),
+          plotGrid(cfg, studyId, { include_png: true }).catch(() => undefined),
+        ]);
+        if (cancelled) return;
+        const restored: RunOutcome = { studyId, created: { study_id: studyId }, stages: [], results: rows, analysis, plot };
+        setOutcome(restored);
+        saveCachedOutcome(studyId, restored);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!cancelled) setRestoring(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [a.run_status, a.run_study_id, baseUrl, token]);
+
+  // `run_status: "running"` is persisted (in `answers`), but the actual
+  // in-flight run — the AbortController and the runStudy() promise walking
+  // the pipeline — lives only in THIS component instance's local state.
+  // Navigating away and back remounts ResultsBody: the new instance inherits
+  // "running" from storage but owns no controller and has no window into
+  // whether the original run is still going, finished, or died silently —
+  // that's the "stuck on Running…" bug. This polls the server directly so a
+  // reconnected mount can self-heal regardless of what happened to the
+  // original request.
+  useEffect(() => {
+    if (status !== "running" || !a.run_study_id || startedHereRef.current) return;
+    const sid = a.run_study_id;
+    let cancelled = false;
+    const timer = setInterval(async () => {
+      try {
+        const { rows } = await getAllResults(cfg, sid);
+        if (cancelled || !rows.length) return;
+        clearInterval(timer);
+        const [analysis, plot] = await Promise.all([
+          runAnalysis(cfg, sid).catch(() => undefined),
+          plotGrid(cfg, sid, { include_png: true }).catch(() => undefined),
+        ]);
+        if (cancelled) return;
+        const restored: RunOutcome = { studyId: sid, created: { study_id: sid }, stages: [], results: rows, analysis, plot };
+        setOutcome(restored);
+        saveCachedOutcome(sid, restored);
+        setAnswer("run_status", "done");
+      } catch {
+        // Not ready yet (results endpoint 404s until the run reaches the
+        // collect stage) — keep polling rather than surfacing every miss.
+      }
+    }, 5000);
+    return () => { cancelled = true; clearInterval(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, a.run_study_id, baseUrl, token]);
+
+  // Only Study Design and User Model need to be finished before running a
+  // simulation — the other pages (research questions, apparatus, procedure)
+  // are useful for the write-up but not required by the simulation itself.
+  const incomplete = PAGES.filter((p) => (p.kind === "studydesign" || p.kind === "usermodel") && !isPageComplete(p, a));
   const ready = incomplete.length === 0;
 
-  const { framework, options: simOptions, warning: cogWarning } = simulateOptionsFor(
+  const { options: simOptions, warning: cogWarning } = simulateOptionsFor(
     a.user_model || "",
     hasXaiPropertyIv(a),
     parseCogConfig(a),
@@ -1061,6 +1170,7 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
     }
     const ctrl = new AbortController();
     abortRef.current = ctrl;
+    startedHereRef.current = true;
     setError("");
     setNote("");
     setOutcome(null);
@@ -1081,6 +1191,7 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
         { trials: { num_training: split.training, num_testing: split.testing } }
       );
       setOutcome(res);
+      saveCachedOutcome(res.studyId, res);
       setAnswer("run_status", "done");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -1091,7 +1202,19 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
   }
 
   function cancel() {
-    abortRef.current?.abort();
+    if (abortRef.current) {
+      // This mount owns the live request — a real cancel.
+      abortRef.current.abort();
+      return;
+    }
+    // Reconnected to a "running" state this mount didn't start (e.g. after
+    // navigating away and back) — there's no controller here to abort, so
+    // this can only stop watching locally, not guarantee the server-side run
+    // itself stops. Without this, Cancel silently did nothing and the page
+    // stayed on "Running…" forever once the background poll gave up hope of
+    // ever seeing results (or if the original run genuinely died).
+    setAnswer("run_status", "failed");
+    setError("Stopped watching this run — it may still be executing on the server, this page just isn't tracking it anymore.");
   }
 
   const studyId = outcome?.studyId || a.run_study_id || "";
@@ -1120,6 +1243,11 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
   const activeDv = dvOptions.includes(dv) ? dv : preferredDv || dvOptions[0] || "";
   const analysisTables = tablesFrom(outcome?.analysis, "");
   const posthocTables = tablesFrom(posthoc, "");
+  // Flagged when the server substituted a DV the cognitive model can't
+  // produce (currently always forward_accuracy) — the tables above already
+  // exclude the coerced/warning fields themselves (server.ts's tablesFrom),
+  // this is what surfaces the caveat instead.
+  const dvWarnings = dvCoercionWarnings(outcome?.analysis);
 
   useEffect(() => {
     if (resultView !== "overall" || !studyId || !activeDv) return;
@@ -1132,11 +1260,34 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resultView, studyId, activeDv, baseUrl, token]);
 
+  // Interaction plot: X-axis IV × a second IV as the split/color, for one DV
+  // ("Accuracy by XAI type, split by Dataset" is the natural view once a
+  // design has a Dataset IV). Options come from the design's own declared IVs
+  // — buildExportJson sends each IV's *label* as its `factor` name, and the
+  // server's default analysis/plot IVs are keyed off that same name, so the
+  // picker uses labels too rather than the internal catalog ids.
+  const ivOptions = Array.from(new Set(parseIvs(a).map((e) => e.label).filter(Boolean)));
+  const activeXIv = ivOptions.includes(xIv) ? xIv : ivOptions[0] || "";
+  const activeHueIv = ivOptions.includes(hueIv) && hueIv !== activeXIv
+    ? hueIv
+    : ivOptions.find((l) => l !== activeXIv) || "";
+
+  useEffect(() => {
+    if (resultView !== "overall" || !studyId || !activeDv || !activeXIv || !activeHueIv) { setInteractionPlot(null); return; }
+    let cancelled = false;
+    setInteractionErr("");
+    plotInteraction(cfg, studyId, { x_iv: activeXIv, hue_iv: activeHueIv, dv: activeDv, include_png: true })
+      .then((r) => { if (!cancelled) setInteractionPlot(pngDataUris(r)[0] ?? null); })
+      .catch((e) => { if (!cancelled) { setInteractionPlot(null); setInteractionErr(e instanceof Error ? e.message : String(e)); } });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resultView, studyId, activeDv, activeXIv, activeHueIv, baseUrl, token]);
+
   // Replay the trial on the study interface: the apparatus config for this
   // trial's condition, at the instance the run actually used.
   const trialUrl = (() => {
     if (!trial || !trial.instanceId) return "";
-    const entry = apparatusForTrial(parseApparatusList(a), { condition: trial.condition });
+    const entry = apparatusForTrial(parseApparatusList(a), { condition: trial.condition, datasetId: trial.datasetId });
     if (entry?.mode === "own") return (entry.url || "").trim();
     return trialStudyUrl(STUDY_UI_ROOT, entry, {
       instanceId: trial.instanceId,
@@ -1170,29 +1321,24 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
           {status === "running" ? (
             <Button variant="outline" size="sm" onClick={cancel}>Cancel</Button>
           ) : null}
-          <button onClick={() => setShowSettings((s) => !s)} className="ml-auto text-xs text-neutral-400 hover:text-neutral-600">
-            Server settings
-          </button>
         </div>
 
-        {showSettings ? (
-          <div className="mt-3 space-y-2 rounded-lg border border-neutral-200 bg-neutral-50/60 p-3">
-            <label className="block text-xs font-medium text-neutral-600">Study server URL</label>
-            <TextInput value={baseUrl} onChange={saveBaseUrl} placeholder={DEFAULT_API_BASE} />
-            <label className="block text-xs font-medium text-neutral-600">Bearer token (only if XAIKIT_API_TOKEN is set)</label>
-            <TextInput value={token} onChange={saveToken} placeholder="leave empty for an unauthenticated server" type="password" />
-            <p className="text-xs text-neutral-400">Stored in this browser only — never part of the design or its exports.</p>
-          </div>
-        ) : null}
-
         <p className="mt-2 text-xs text-neutral-400">
-          Sends the finalized design to <span className="font-medium text-neutral-500">{baseUrl}</span>, then runs dataset → trials → explanations → simulate.
-          Runner: <span className="font-medium text-neutral-500">{framework}</span>. Nothing is sent until you press Run.
+          {status === "running"
+            ? "The simulator is running the experiment you have planned."
+            : status === "done"
+              ? "The simulator has completed the experiment you planned."
+              : "The simulator will run the experiment you have planned."}
         </p>
 
         {!ready ? (
           <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             Finish the design before running — still incomplete: {incomplete.map((p) => p.navTitle).join(", ")}.
+          </p>
+        ) : null}
+        {restoring ? (
+          <p className="mt-2 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-500">
+            Loading your previous run's results…
           </p>
         ) : null}
         {cogWarning ? (
@@ -1342,8 +1488,12 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
               ) : (
                 <div className="space-y-4">
                   {pngs.length ? (
-                    // Sized and centred like the apparatus preview; two-up once
-                    // the server returns more than one figure.
+                    // Two-up once the server returns more than one *separate*
+                    // figure, each capped so the pair stays readable; a single
+                    // figure (often a multi-panel composite, e.g. one XAI-type
+                    // /Tested-W-XAI/Dataset grid) instead gets the full width —
+                    // capping it the same as a lone panel squeezed every
+                    // sub-plot down to unreadable.
                     <div className={cn("grid gap-3", pngs.length > 1 ? "sm:grid-cols-2" : "")}>
                       {pngs.map((src, i) => (
                         <div key={i} className="overflow-hidden rounded-xl border border-neutral-200 bg-white p-2">
@@ -1351,7 +1501,7 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
                           <img
                             src={src}
                             alt={`Overall results plot ${i + 1} rendered by the study server`}
-                            className="mx-auto block h-auto w-full max-w-[420px]"
+                            className={cn("mx-auto block h-auto w-full", pngs.length > 1 ? "max-w-[420px]" : "max-w-full")}
                           />
                         </div>
                       ))}
@@ -1361,6 +1511,55 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
                       <p className="max-w-sm text-xs text-neutral-400">No overall plot came back from the server for this run.</p>
                     </div>
                   )}
+
+                  {ivOptions.length > 1 ? (
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Interaction plot</p>
+                        <select
+                          value={activeXIv}
+                          onChange={(ev) => setXIv(ev.target.value)}
+                          className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs outline-none focus:border-neutral-400"
+                          aria-label="X-axis IV"
+                        >
+                          {ivOptions.map((l) => (<option key={l} value={l}>{l}</option>))}
+                        </select>
+                        <span className="text-xs text-neutral-400">split by</span>
+                        <select
+                          value={activeHueIv}
+                          onChange={(ev) => setHueIv(ev.target.value)}
+                          className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs outline-none focus:border-neutral-400"
+                          aria-label="Split-by IV"
+                        >
+                          {ivOptions.filter((l) => l !== activeXIv).map((l) => (<option key={l} value={l}>{l}</option>))}
+                        </select>
+                      </div>
+                      {interactionErr ? (
+                        <p className="text-xs text-amber-700">{interactionErr}</p>
+                      ) : interactionPlot ? (
+                        <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white p-2">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={interactionPlot}
+                            alt={`${activeDv || "Results"} by ${activeXIv}, split by ${activeHueIv}`}
+                            className="mx-auto block h-auto w-full max-w-[420px]"
+                          />
+                        </div>
+                      ) : (
+                        <p className="text-xs text-neutral-400">Loading interaction plot…</p>
+                      )}
+                    </div>
+                  ) : null}
+
+                  {dvWarnings.length ? (
+                    <div className="space-y-1.5">
+                      {dvWarnings.map((w, i) => (
+                        <p key={i} className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                          {w.dv ? <span className="font-medium">{w.dv}: </span> : null}{w.message}
+                        </p>
+                      ))}
+                    </div>
+                  ) : null}
 
                   {analysisTables.length ? (
                     <div className="space-y-2">

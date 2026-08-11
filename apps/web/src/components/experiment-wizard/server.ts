@@ -387,6 +387,12 @@ export function orderStatColumns(columns: string[]): string[] {
 // far too long to render as a table.
 const SKIP_TABLE_KEYS = new Set(["participant_level_data", "participant_data", "raw_data", "raw"]);
 
+// When a requested DV isn't one the cognitive model can produce, the server
+// coerces the analysis to `forward_accuracy` and marks the entry with these —
+// metadata about the analysis, not a statistic, so it's kept out of the table
+// and surfaced instead as a banner (see dvCoercionWarnings below).
+const DV_COERCION_KEYS = new Set(["coerced", "warning", "coercion_warning"]);
+
 const prettyKey = (k: string) => k.replace(/_/g, " ");
 const joinLabel = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(" · ");
 
@@ -398,7 +404,7 @@ export function tablesFrom(data: unknown, label = "", depth = 0): SimpleTable[] 
     if (!records.length || records.length !== data.length) return [];
     const columns: string[] = [];
     for (const r of records) for (const k of Object.keys(r)) if (!columns.includes(k)) columns.push(k);
-    const scalar = columns.filter((c) => records.every((r) => !isFlatObject(r[c]) && !Array.isArray(r[c])));
+    const scalar = columns.filter((c) => !DV_COERCION_KEYS.has(c) && records.every((r) => !isFlatObject(r[c]) && !Array.isArray(r[c])));
 
     const out: SimpleTable[] = [];
     if (scalar.length) {
@@ -429,6 +435,46 @@ export function tablesFrom(data: unknown, label = "", depth = 0): SimpleTable[] 
     return out;
   }
   return [];
+}
+
+export interface DvCoercionNotice {
+  dv?: string;
+  message: string;
+}
+
+/**
+ * Walk an /analysis response for entries the server marked `coerced: true`
+ * (a requested DV the cognitive model can't produce, substituted with one it
+ * can — currently always `forward_accuracy`) and surface the warning text
+ * that rides along with it. Independent of tablesFrom: DV_COERCION_KEYS keeps
+ * these two fields out of the rendered stat tables, this is what puts them in
+ * front of the user instead.
+ */
+export function dvCoercionWarnings(data: unknown, depth = 0): DvCoercionNotice[] {
+  if (!data || depth > 4) return [];
+  const out: DvCoercionNotice[] = [];
+  if (Array.isArray(data)) {
+    for (const v of data) out.push(...dvCoercionWarnings(v, depth + 1));
+  } else if (isFlatObject(data)) {
+    if (data.coerced === true) {
+      const rawMsg = data.warning ?? data.coercion_warning;
+      const message = typeof rawMsg === "string" && rawMsg.trim()
+        ? rawMsg
+        : "A dependent variable in this analysis isn't one the cognitive model can produce, so the server substituted a measure it can — the table above reports that substitute, not the DV as named.";
+      const dv = typeof data.dv === "string" ? data.dv : typeof data.dv_label === "string" ? data.dv_label : undefined;
+      out.push({ dv, message });
+    }
+    for (const v of Object.values(data)) out.push(...dvCoercionWarnings(v, depth + 1));
+  }
+  // De-dupe: the same coerced entry is often reachable via more than one path
+  // (e.g. nested under both `analyses` and a per-IV breakdown).
+  const seen = new Set<string>();
+  return out.filter((n) => {
+    const key = `${n.dv ?? ""}::${n.message}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 // Compact cell text: keep p-values readable, round long floats, avoid "[object Object]".
