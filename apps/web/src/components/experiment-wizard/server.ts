@@ -182,6 +182,12 @@ export interface ResultsPage {
   rows?: ResultRow[];
   results?: ResultRow[];
   total?: number;
+  // The design's actual IVs, filtered to those present in the results — the
+  // authoritative list for /plots' x_iv/hue_iv (and posthoc's condition_cols).
+  // Columns like explanation_type/condition_name/shown_xai_type show up in
+  // `columns` (the data table) but are NOT valid plot factors and 400 if sent;
+  // this is what tells the picker which of the "columns" are actually safe.
+  plot_variables?: string[];
   [k: string]: unknown;
 }
 
@@ -205,19 +211,21 @@ export async function getAllResults(
   cfg: ApiConfig,
   studyId: string,
   opts: { pageSize?: number } = {}
-): Promise<{ rows: ResultRow[]; total: number }> {
+): Promise<{ rows: ResultRow[]; total: number; plotVariables?: string[] }> {
   const pageSize = opts.pageSize ?? 2000;
   const out: ResultRow[] = [];
   let total = 0;
+  let plotVariables: string[] | undefined;
   for (let offset = 0; ; offset += pageSize) {
     const page = await getResults(cfg, studyId, { limit: pageSize, offset });
     const rows = rowsOf(page);
     if (typeof page.total === "number") total = page.total;
+    if (!plotVariables && Array.isArray(page.plot_variables)) plotVariables = page.plot_variables;
     out.push(...rows);
     if (rows.length < pageSize) break; // short/empty page = last page
     if (total && out.length >= total) break;
   }
-  return { rows: out, total: total || out.length };
+  return { rows: out, total: total || out.length, plotVariables };
 }
 
 // The server returns the rows under one of a few plausible keys; find the array.
@@ -301,24 +309,23 @@ export function dvColumnsOf(rows: ResultRow[]): string[] {
   );
 }
 
-// The subset of NON_DV_COLUMNS that are genuine manipulated factors rather
-// than row bookkeeping (participantId, instanceId, phase, …) — candidates for
-// /plots/interaction's x_iv/hue_iv. "dataset" isn't in NON_DV_COLUMNS (it's a
-// string, so dvColumnsOf's numeric/boolean filter already excludes it there)
-// but belongs here for multi-dataset designs.
-const IV_CANDIDATE_COLUMNS = ["dataset", "xai_type", "tested_w_xai", "condition_name", "explanation_type"];
+// Fallback only — the server now returns the authoritative list itself as
+// `plot_variables` on GET /results (see ResultsPage/getAllResults), which
+// ivColumnsOf() is a stand-in for when that's unavailable (an outcome cached
+// before this field existed — see RunOutcome.plotVariables). Restricted to
+// columns confirmed safe: the server explicitly rejects explanation_type,
+// selected_strategy, cognitive_model_strategy, condition_name, shown_xai_type
+// and withinCondition as plot factors even though several are real results
+// columns (dvColumnsOf/NON_DV_COLUMNS territory) — they read like IVs but
+// aren't ones the plot endpoints accept.
+const IV_CANDIDATE_COLUMNS = ["dataset", "xai_type", "tested_w_xai"];
 
 /**
  * The IV-like columns actually present in a run's results, each with 2+
  * distinct values (so a constant column — e.g. a single-dataset run's
- * "dataset" — never shows up as something to plot by).
- *
- * Like dvColumnsOf, this exists because /plots/interaction's x_iv/hue_iv take
- * the results table's actual column names (server.ts's `name`, slugified),
- * never the design's prose IV labels (`buildExportJson`'s `factor`, e.g.
- * "XAI Type") — sending a label 400s with "missing columns", since the server
- * only resolves label → name when it parses the exported design JSON itself,
- * not on a client-supplied plot request.
+ * "dataset" — never shows up as something to plot by). Prefer
+ * `RunOutcome.plotVariables` (the server's own authoritative list) over this
+ * — see the comment on IV_CANDIDATE_COLUMNS above.
  */
 export function ivColumnsOf(rows: ResultRow[]): string[] {
   if (!rows.length) return [];
@@ -818,6 +825,11 @@ export interface RunOutcome {
   results: ResultRow[];
   analysis?: unknown;
   plot?: PlotResponse;
+  // The design's actual IVs, filtered to those present in the results — the
+  // authoritative source for the interaction-plot picker. Optional so old
+  // cached/restored outcomes (from before this field existed) degrade to
+  // ivColumnsOf's heuristic rather than breaking.
+  plotVariables?: string[];
 }
 
 /**
@@ -904,11 +916,14 @@ export async function runStudy(
   collect.status = "running";
   emit();
   let results: ResultRow[] = [];
+  let plotVariables: string[] | undefined;
   let analysis: unknown;
   let plot: PlotResponse | undefined;
   const problems: string[] = [];
   try {
-    results = (await getAllResults(cfg, studyId)).rows;
+    const r = await getAllResults(cfg, studyId);
+    results = r.rows;
+    plotVariables = r.plotVariables;
   } catch (e) {
     problems.push(`results: ${(e as Error).message}`);
   }
@@ -926,5 +941,5 @@ export async function runStudy(
   if (problems.length) collect.error = problems.join(" · ");
   emit();
 
-  return { studyId, created, stages, results, analysis, plot };
+  return { studyId, created, stages, results, analysis, plot, plotVariables };
 }

@@ -1089,13 +1089,13 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
     setError("");
     (async () => {
       try {
-        const [{ rows }, analysis, plot] = await Promise.all([
+        const [{ rows, plotVariables }, analysis, plot] = await Promise.all([
           getAllResults(cfg, studyId),
           runAnalysis(cfg, studyId).catch(() => undefined),
           plotGrid(cfg, studyId, { include_png: true }).catch(() => undefined),
         ]);
         if (cancelled) return;
-        const restored: RunOutcome = { studyId, created: { study_id: studyId }, stages: [], results: rows, analysis, plot };
+        const restored: RunOutcome = { studyId, created: { study_id: studyId }, stages: [], results: rows, analysis, plot, plotVariables };
         setOutcome(restored);
         saveCachedOutcome(studyId, restored);
       } catch (e) {
@@ -1123,7 +1123,7 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
     let cancelled = false;
     const timer = setInterval(async () => {
       try {
-        const { rows } = await getAllResults(cfg, sid);
+        const { rows, plotVariables } = await getAllResults(cfg, sid);
         if (cancelled || !rows.length) return;
         clearInterval(timer);
         const [analysis, plot] = await Promise.all([
@@ -1131,7 +1131,7 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
           plotGrid(cfg, sid, { include_png: true }).catch(() => undefined),
         ]);
         if (cancelled) return;
-        const restored: RunOutcome = { studyId: sid, created: { study_id: sid }, stages: [], results: rows, analysis, plot };
+        const restored: RunOutcome = { studyId: sid, created: { study_id: sid }, stages: [], results: rows, analysis, plot, plotVariables };
         setOutcome(restored);
         saveCachedOutcome(sid, restored);
         setAnswer("run_status", "done");
@@ -1262,14 +1262,16 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
 
   // Interaction plot: X-axis IV × a second IV as the split/color, for one DV
   // ("Accuracy by XAI type, split by Dataset" is the natural view once a
-  // design has a Dataset IV). Options come from the actual results columns
-  // (ivColumnsOf), same as the DV dropdown's dvColumnsOf — NOT from the
-  // design's declared IV labels (buildExportJson's `factor`, e.g. "XAI
-  // Type"). /plots/interaction takes the results table's real column name
-  // ("xai_type"); the server only resolves label → name while parsing the
-  // exported design JSON at study-creation time, not on this endpoint, so a
-  // label 400s with "missing columns".
-  const ivOptions = ivColumnsOf(rows);
+  // design has a Dataset IV). Options come from the server's own
+  // `plot_variables` (the design's actual IVs, filtered to those present in
+  // the results) — NOT the design's declared IV labels (buildExportJson's
+  // `factor`, e.g. "XAI Type": /plots/interaction wants the results table's
+  // real column name, "xai_type", and 400s on a label — see server.ts) — and
+  // not every results column either: some (explanation_type, condition_name,
+  // shown_xai_type, …) read like IVs but are explicitly rejected as plot
+  // factors. Falls back to the ivColumnsOf heuristic only for an outcome
+  // cached before plotVariables existed.
+  const ivOptions = outcome?.plotVariables?.length ? outcome.plotVariables : ivColumnsOf(rows);
   const activeXIv = ivOptions.includes(xIv) ? xIv : ivOptions[0] || "";
   const activeHueIv = ivOptions.includes(hueIv) && hueIv !== activeXIv
     ? hueIv
