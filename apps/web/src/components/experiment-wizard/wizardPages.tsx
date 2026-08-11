@@ -26,7 +26,7 @@ import {
   StageProgress, RunOutcome, runStudy, simulateOptionsFor, downloadResultsCsv, pngDataUris,
   TrialView, trialViewOf, runPostHoc, tablesFrom, formatCell, SimpleTable,
   dvColumnsOf, matchDvColumn, getAllResults, runAnalysis, plotGrid,
-  dvCoercionWarnings, plotInteraction,
+  dvCoercionWarnings, plotInteraction, ivColumnsOf,
 } from "./server";
 
 // Re-exported for backward compatibility with existing imports of these from this module.
@@ -1262,11 +1262,14 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
 
   // Interaction plot: X-axis IV × a second IV as the split/color, for one DV
   // ("Accuracy by XAI type, split by Dataset" is the natural view once a
-  // design has a Dataset IV). Options come from the design's own declared IVs
-  // — buildExportJson sends each IV's *label* as its `factor` name, and the
-  // server's default analysis/plot IVs are keyed off that same name, so the
-  // picker uses labels too rather than the internal catalog ids.
-  const ivOptions = Array.from(new Set(parseIvs(a).map((e) => e.label).filter(Boolean)));
+  // design has a Dataset IV). Options come from the actual results columns
+  // (ivColumnsOf), same as the DV dropdown's dvColumnsOf — NOT from the
+  // design's declared IV labels (buildExportJson's `factor`, e.g. "XAI
+  // Type"). /plots/interaction takes the results table's real column name
+  // ("xai_type"); the server only resolves label → name while parsing the
+  // exported design JSON at study-creation time, not on this endpoint, so a
+  // label 400s with "missing columns".
+  const ivOptions = ivColumnsOf(rows);
   const activeXIv = ivOptions.includes(xIv) ? xIv : ivOptions[0] || "";
   const activeHueIv = ivOptions.includes(hueIv) && hueIv !== activeXIv
     ? hueIv
@@ -1522,7 +1525,7 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
                           className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs outline-none focus:border-neutral-400"
                           aria-label="X-axis IV"
                         >
-                          {ivOptions.map((l) => (<option key={l} value={l}>{l}</option>))}
+                          {ivOptions.map((l) => (<option key={l} value={l}>{l.replace(/_/g, " ")}</option>))}
                         </select>
                         <span className="text-xs text-neutral-400">split by</span>
                         <select
@@ -1531,7 +1534,7 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
                           className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs outline-none focus:border-neutral-400"
                           aria-label="Split-by IV"
                         >
-                          {ivOptions.filter((l) => l !== activeXIv).map((l) => (<option key={l} value={l}>{l}</option>))}
+                          {ivOptions.filter((l) => l !== activeXIv).map((l) => (<option key={l} value={l}>{l.replace(/_/g, " ")}</option>))}
                         </select>
                       </div>
                       {interactionErr ? (

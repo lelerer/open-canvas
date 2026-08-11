@@ -301,6 +301,36 @@ export function dvColumnsOf(rows: ResultRow[]): string[] {
   );
 }
 
+// The subset of NON_DV_COLUMNS that are genuine manipulated factors rather
+// than row bookkeeping (participantId, instanceId, phase, …) — candidates for
+// /plots/interaction's x_iv/hue_iv. "dataset" isn't in NON_DV_COLUMNS (it's a
+// string, so dvColumnsOf's numeric/boolean filter already excludes it there)
+// but belongs here for multi-dataset designs.
+const IV_CANDIDATE_COLUMNS = ["dataset", "xai_type", "tested_w_xai", "condition_name", "explanation_type"];
+
+/**
+ * The IV-like columns actually present in a run's results, each with 2+
+ * distinct values (so a constant column — e.g. a single-dataset run's
+ * "dataset" — never shows up as something to plot by).
+ *
+ * Like dvColumnsOf, this exists because /plots/interaction's x_iv/hue_iv take
+ * the results table's actual column names (server.ts's `name`, slugified),
+ * never the design's prose IV labels (`buildExportJson`'s `factor`, e.g.
+ * "XAI Type") — sending a label 400s with "missing columns", since the server
+ * only resolves label → name when it parses the exported design JSON itself,
+ * not on a client-supplied plot request.
+ */
+export function ivColumnsOf(rows: ResultRow[]): string[] {
+  if (!rows.length) return [];
+  const present = new Set<string>();
+  for (const r of rows.slice(0, 50)) for (const k of Object.keys(r)) present.add(k);
+  return IV_CANDIDATE_COLUMNS.filter((c) => {
+    if (!present.has(c)) return false;
+    const values = new Set(rows.map((r) => String(r[c] ?? "")).filter(Boolean));
+    return values.size > 1;
+  });
+}
+
 /**
  * Map a design's DV label onto the results column it refers to —
  * "Counterfactual-Simulation Accuracy" -> "counterfactual_accuracy" — by
