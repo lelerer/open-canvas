@@ -1193,8 +1193,29 @@ export function normalizeApparatusEntry(x: any): ApparatusEntry {
 export function normalizeApparatusList(arr: any): ApparatusEntry[] {
   return Array.isArray(arr) ? arr.map(normalizeApparatusEntry) : [];
 }
+// The dataset an "ours" apparatus runs on is decided by the design, not by a
+// picker on the Apparatus page: XAI-Property designs always use the Sim2Real
+// screen; a "Dataset = X" segment in the entry's group (a Dataset IV level)
+// wins next; otherwise the Study Design page's dataset applies. Falls back to
+// whatever the entry already stored (older saves / assistant-written configs).
+export function apparatusAppIdFor(a: Answers, e: ApparatusEntry): string {
+  if (hasXaiPropertyIv(a)) return "adult_sim2real";
+  const seg = (e.group || "").split("·").map((s) => s.trim())
+    .find((s) => /dataset/i.test(s.slice(0, Math.max(0, s.indexOf("=")))));
+  const level = seg ? seg.slice(seg.indexOf("=") + 1).trim() : "";
+  const label = level || (a.ds_dataset || "").trim();
+  const ds = label
+    ? STUDY_DATASETS.find((d) => d.label === label || d.appId === label || slugId(d.label) === slugId(label))
+    : undefined;
+  return ds?.appId || e.params.appId || "wine_quality";
+}
 export function parseApparatusList(a: Answers): ApparatusEntry[] {
-  try { return normalizeApparatusList(JSON.parse(a.apparatus_list || "[]")); } catch { return []; }
+  try {
+    const list = normalizeApparatusList(JSON.parse(a.apparatus_list || "[]"));
+    // Derived on every read so all consumers (URL builder, previews, QSF and
+    // JSON exports, the run-experiment request) agree on the dataset.
+    return list.map((e) => (e.mode === "ours" ? { ...e, params: { ...e.params, appId: apparatusAppIdFor(a, e) } } : e));
+  } catch { return []; }
 }
 
 // ---- Replaying a simulated trial on the study interface ----

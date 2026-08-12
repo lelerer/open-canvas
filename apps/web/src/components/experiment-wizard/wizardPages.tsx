@@ -97,6 +97,39 @@ export function ScaledIframe({ src, title, naturalW, naturalH }: { src: string; 
   );
 }
 
+// Preview for a researcher-supplied URL. Sites that forbid framing
+// (X-Frame-Options / CSP frame-ancestors — e.g. Google, most banks) make the
+// iframe show the browser's "refused to connect" error; we check the headers
+// via /api/embed-check and show a clear fallback instead.
+export function OwnUrlPreview({ url, title, naturalW, naturalH }: { url: string; title: string; naturalW: number; naturalH: number }) {
+  const [blocked, setBlocked] = useState<boolean | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setBlocked(null);
+    fetch(`/api/embed-check?url=${encodeURIComponent(url)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setBlocked(d?.embeddable === false); })
+      .catch(() => { if (!cancelled) setBlocked(false); });
+    return () => { cancelled = true; };
+  }, [url]);
+
+  if (blocked) {
+    return (
+      <div className="grid min-h-[160px] place-items-center bg-neutral-50/60 p-6 text-center">
+        <div className="max-w-md">
+          <p className="text-sm font-medium text-neutral-700">This site doesn't allow embedding</p>
+          <p className="mt-1 text-xs text-neutral-400">It blocks being shown inside other pages (X-Frame-Options), so no preview is possible here. The URL itself is fine — participants will open it directly.</p>
+          <a href={url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 rounded-md border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-600 hover:bg-neutral-50">Open in a new tab ↗</a>
+        </div>
+      </div>
+    );
+  }
+  if (blocked === null) {
+    return <div className="grid min-h-[160px] place-items-center bg-neutral-50/60 text-sm text-neutral-400">Checking preview…</div>;
+  }
+  return <ScaledIframe src={url} title={title} naturalW={naturalW} naturalH={naturalH} />;
+}
+
 export function ParamField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
@@ -131,7 +164,11 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
       label: "Configuration 1",
       group: "All participants",
       mode: a.apparatus_mode === "own" ? "own" : "ours",
-      params: legacyParams,
+      // XAI-Property designs run on the Sim2Real screen — seed its train/test
+      // split unless the legacy params already carry instance lists.
+      params: hasXaiPropertyIv(a) && !legacyParams.trainingInstanceIds && !legacyParams.instanceIds
+        ? { ...defaultSim2realInstanceIds(), ...legacyParams }
+        : legacyParams,
       url: a.apparatus_url || "",
     });
     setAnswer("apparatus_list", JSON.stringify([seed]));
@@ -241,11 +278,6 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                     );
                     return (
                       <div className="space-y-4">
-                        {hasXP && !sim2real ? (
-                          <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                            Your Study Design manipulates <strong>XAI Property</strong> — pick the <strong>Adult Income (XAI Property)</strong> dataset below to use the Sim2Real interface.
-                          </p>
-                        ) : null}
                         {!hasXP && sim2real ? (
                           <p className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
                             This dataset uses the <strong>Sim2Real (XAI Property)</strong> interface — it's meant for designs where XAI Property is the independent variable.
@@ -304,24 +336,10 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                         {/* Material configuration */}
                         <div>
                           <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Material configuration</p>
-                          <p className="mt-0.5 text-xs text-neutral-400">Choose the data, explanation, and example shown in the preview. The AI model is set automatically by the dataset.</p>
+                          <p className="mt-0.5 text-xs text-neutral-400">Choose the explanation and example shown in the preview. The dataset comes from the Study Design page; the AI model is set automatically by the dataset.</p>
                           <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
                             <ParamField label="Dataset">
-                              <select
-                                value={p.appId || "wine_quality"}
-                                onChange={(ev) => {
-                                  const appId = ev.target.value;
-                                  // Switching to the Sim2Real screen seeds its train/test split,
-                                  // but never overwrites instance lists already entered.
-                                  const seed = appId === "adult_sim2real" && !e.params.trainingInstanceIds && !e.params.instanceIds
-                                    ? defaultSim2realInstanceIds()
-                                    : {};
-                                  patchEntry(e.id, { params: { ...e.params, appId, ...seed } });
-                                }}
-                                className={pcls}
-                              >
-                                {STUDY_DATASETS.map((d) => (<option key={d.appId} value={d.appId}>{d.label}</option>))}
-                              </select>
+                              <div className={cn(pcls, "bg-neutral-50 text-neutral-500")} title="Set on the Study Design page (or by this group's Dataset IV level)">{dsLabel}</div>
                             </ParamField>
                             {!sim2real ? (
                               <ParamField label="Explanation form">
@@ -383,15 +401,6 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                                 className={pcls}
                               />
                             </ParamField>
-                            {ns === "local" ? (
-                              <ParamField label="User selection">
-                                <select value={p.userPrediction ?? "none"} onChange={(ev) => setParam(e, "userPrediction", ev.target.value)} className={pcls}>
-                                  <option value="none">No selection</option>
-                                  <option value="0">Class 0</option>
-                                  <option value="1">Class 1</option>
-                                </select>
-                              </ParamField>
-                            ) : null}
                           </div>
 
                           {ids.length ? (
@@ -415,7 +424,6 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                             {sim2real ? flagCheck("Show change to consider (delta)", p.showDelta !== "0", () => setParam(e, "showDelta", p.showDelta === "0" ? "1" : "0")) : null}
                             {sim2real ? flagCheck("Show AI prediction", p.showPrediction !== "0", () => setParam(e, "showPrediction", p.showPrediction === "0" ? "1" : "0")) : null}
                             {sim2real ? flagCheck("Show question", p.showQuestion !== "0", () => setParam(e, "showQuestion", p.showQuestion === "0" ? "1" : "0")) : null}
-                            {ns === "local" ? flagCheck("Focus the participant on important features", p.focusOnImportant === "1", () => setParam(e, "focusOnImportant", p.focusOnImportant === "1" ? "0" : "1")) : null}
                             {ns === "global" && form === "DT" ? flagCheck("Participant edits the tree", p.DTEditor === "1", () => setParam(e, "DTEditor", p.DTEditor === "1" ? "0" : "1")) : null}
                             {ns === "global" ? flagCheck("Show the explanation's prediction", p.showExplanationPrediction !== "0", () => setParam(e, "showExplanationPrediction", p.showExplanationPrediction === "0" ? "1" : "0")) : null}
                             {ns === "global" && els.includes("sliders") ? flagCheck("Ask participants to confirm slider changes (recourse)", p.recourseConfirm === "1", () => setParam(e, "recourseConfirm", p.recourseConfirm === "1" ? "0" : "1")) : null}
@@ -442,7 +450,12 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                     <span className="text-[11px] uppercase tracking-wide text-neutral-400">Preview</span>
                     {preview ? (
                       <div className="mt-1 overflow-hidden rounded-lg border border-neutral-200 bg-white">
-                        {(() => { const nat = studyNaturalSize(e.mode, entryParams(e)); return <ScaledIframe src={preview} title={`Preview ${e.label}`} naturalW={nat.w} naturalH={nat.h} />; })()}
+                        {(() => {
+                          const nat = studyNaturalSize(e.mode, entryParams(e));
+                          return e.mode === "own"
+                            ? <OwnUrlPreview url={preview} title={`Preview ${e.label}`} naturalW={nat.w} naturalH={nat.h} />
+                            : <ScaledIframe src={preview} title={`Preview ${e.label}`} naturalW={nat.w} naturalH={nat.h} />;
+                        })()}
                       </div>
                     ) : (
                       <div className="mt-1 grid h-[160px] place-items-center rounded-lg border border-dashed border-neutral-300 bg-neutral-50/50 text-sm text-neutral-400">Paste a URL to preview.</div>

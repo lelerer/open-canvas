@@ -216,9 +216,13 @@ export function DvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer:
   );
 }
 
+const CUSTOM_TYPE = "__custom__";
+
 export function VariableList({ valueKey, answers, setAnswer, namePlaceholder }: { valueKey: string; answers: Answers; setAnswer: (id: string, v: string) => void; namePlaceholder?: string }) {
   const items = parseVars(answers[valueKey]);
   const [types, setTypes] = useState<string[]>([]);
+  // Rows where the user picked "Custom…" and is typing a free-text type.
+  const [customRows, setCustomRows] = useState<Record<number, boolean>>({});
 
   useEffect(() => {
     try {
@@ -238,45 +242,78 @@ export function VariableList({ valueKey, answers, setAnswer, namePlaceholder }: 
     setAnswer(valueKey, JSON.stringify(next));
   }
   function add() { save([...items, { name: "", type: "" }]); }
-  function remove(i: number) { save(items.filter((_, idx) => idx !== i)); }
+  function remove(i: number) {
+    save(items.filter((_, idx) => idx !== i));
+    setCustomRows((r) => {
+      const next: Record<number, boolean> = {};
+      for (const [k, on] of Object.entries(r)) {
+        const idx = Number(k);
+        if (idx === i) continue;
+        next[idx > i ? idx - 1 : idx] = on;
+      }
+      return next;
+    });
+  }
   function update(i: number, patch: Partial<Variable>) {
     save(items.map((v, idx) => (idx === i ? { ...v, ...patch } : v)));
   }
 
-  const listId = `vartypes-${valueKey}`;
   const typeOptions = Array.from(new Set([...COMMON_VAR_TYPES, ...types]));
   const inputCls = "border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none placeholder:text-neutral-300 focus:border-neutral-500";
 
   return (
     <div style={{ fontFamily: "ui-sans-serif, system-ui" }}>
-      <datalist id={listId}>
-        {typeOptions.map((t) => (<option key={t} value={t} />))}
-      </datalist>
-
       {items.length === 0 ? <p className="text-sm text-neutral-400">None yet — add one below.</p> : null}
 
       <div className="space-y-2">
-        {items.map((v, i) => (
-          <div key={i} className="flex items-center gap-3">
-            <input
-              value={v.name}
-              onChange={(e) => update(i, { name: e.target.value })}
-              placeholder={namePlaceholder || "name"}
-              className={cn(inputCls, "flex-1")}
-            />
-            <input
-              value={v.type}
-              onChange={(e) => update(i, { type: e.target.value })}
-              onBlur={() => rememberType(v.type)}
-              list={listId}
-              placeholder="type (custom)"
-              className={cn(inputCls, "w-40")}
-            />
-            <button type="button" onClick={() => remove(i)} className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600" aria-label="Remove">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        ))}
+        {items.map((v, i) => {
+          const isCustom = !!customRows[i] || (!!v.type && !typeOptions.includes(v.type));
+          return (
+            <div key={i} className="flex items-center gap-3">
+              <input
+                value={v.name}
+                onChange={(e) => update(i, { name: e.target.value })}
+                placeholder={namePlaceholder || "name"}
+                className={cn(inputCls, "flex-1")}
+              />
+              {isCustom ? (
+                <input
+                  value={v.type}
+                  onChange={(e) => update(i, { type: e.target.value })}
+                  onBlur={() => {
+                    rememberType(v.type);
+                    // An emptied custom field goes back to the dropdown.
+                    if (!v.type.trim()) setCustomRows((r) => ({ ...r, [i]: false }));
+                  }}
+                  placeholder="custom type"
+                  autoFocus={!!customRows[i]}
+                  className={cn(inputCls, "w-40")}
+                />
+              ) : (
+                <select
+                  value={typeOptions.includes(v.type) ? v.type : ""}
+                  onChange={(e) => {
+                    if (e.target.value === CUSTOM_TYPE) {
+                      setCustomRows((r) => ({ ...r, [i]: true }));
+                      update(i, { type: "" });
+                    } else {
+                      setCustomRows((r) => ({ ...r, [i]: false }));
+                      update(i, { type: e.target.value });
+                    }
+                  }}
+                  className={cn("w-40 border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none focus:border-neutral-500", v.type ? "text-neutral-900" : "text-neutral-400")}
+                >
+                  {!v.type ? <option value="">type…</option> : null}
+                  {typeOptions.map((t) => (<option key={t} value={t} className="text-neutral-900">{t}</option>))}
+                  <option value={CUSTOM_TYPE} className="text-neutral-900">Custom…</option>
+                </select>
+              )}
+              <button type="button" onClick={() => remove(i)} className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600" aria-label="Remove">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          );
+        })}
       </div>
 
       <button type="button" onClick={add} className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-dashed border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:bg-neutral-50">
