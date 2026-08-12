@@ -9,7 +9,7 @@ import {
   parseIvs, parseVars, varsSummary, parseDvs, dvSummary, dvDisplayName,
   parseProcSteps, procStepsSummary,
   normalizeIvSpecs, normalizeDvSpecs, normalizeVarSpecs, normalizeProcSpecs,
-  totalCells, mlProxyNames, cogConfigSummary, IvEntry, ivAgentFor,
+  totalCells, mlProxyNames, cogConfigSummary, IvEntry, ivAgentFor, dedupeIvEntries,
   parseApparatusList, normalizeApparatusEntry,
 } from "./questions";
 
@@ -111,7 +111,10 @@ export const OP_CFG: Record<string, OpTargetCfg> = {
   },
   sd_ivs: {
     parse: (a) => parseIvs(a),
-    write: (a, list) => ({ ...a, sd_ivs: JSON.stringify(list), sd_conditions: String(totalCells(list as IvEntry[])) }),
+    write: (a, list) => {
+      const deduped = dedupeIvEntries(list as IvEntry[]);
+      return { ...a, sd_ivs: JSON.stringify(deduped), sd_conditions: String(totalCells(deduped)) };
+    },
     match: (it, q) => fuzzyHas(String(it.label || "") + " " + String(it.factor || ""), q),
     build: (v, a) => normalizeIvSpecs([v], ivAgentOf(a))[0] ?? null,
   },

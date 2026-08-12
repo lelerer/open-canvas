@@ -54,10 +54,26 @@ export function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setA
           <VariableList valueKey="sd_rv" answers={answers} setAnswer={setAnswer} namePlaceholder="e.g. participant, stimulus order" />
         </div>
 
-        <div className="border-t border-neutral-100 pt-6">
-          <DocLabel>Dataset</DocLabel>
-          <DatasetPicker answers={answers} setAnswer={setAnswer} />
-        </div>
+        {(() => {
+          // When Dataset is manipulated as an IV, its levels define the datasets:
+          //  - Dataset is the ONLY IV → the picker below is redundant; hide it.
+          //  - other IVs exist too → keep the picker (it sets the dataset used by
+          //    the other IVs' trials) with a note clarifying its scope.
+          const datasetIsIv = ivs.some((e) => e.factor === "dataset");
+          const otherIvsExist = ivs.some((e) => e.factor && e.factor !== "dataset");
+          if (datasetIsIv && !otherIvsExist) return null;
+          return (
+            <div className="border-t border-neutral-100 pt-6">
+              <DocLabel>Dataset</DocLabel>
+              <DatasetPicker answers={answers} setAnswer={setAnswer} />
+              {datasetIsIv ? (
+                <p className="mt-1.5 text-xs text-amber-700" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+                  Dataset is also an independent variable — this selection applies only to the other IVs' trials; the Dataset IV compares the datasets chosen as its levels above.
+                </p>
+              ) : null}
+            </div>
+          );
+        })()}
 
         <div className="border-t border-neutral-100 pt-6">
           <DocLabel>Participants</DocLabel>
@@ -275,7 +291,7 @@ export function DatasetPicker({ answers, setAnswer }: { answers: Answers; setAns
   return (
     <div style={{ fontFamily: "ui-sans-serif, system-ui" }}>
       <select
-        value={a.ds_dataset ?? ""}
+        value={DATASET_OPTIONS.includes((a.ds_dataset || "").trim()) ? (a.ds_dataset || "").trim() : ""}
         onChange={(e) => setAnswer("ds_dataset", e.target.value)}
         className={cn("min-w-[12rem] rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-400", a.ds_dataset ? "text-neutral-900" : "text-neutral-400")}
       >
@@ -283,11 +299,6 @@ export function DatasetPicker({ answers, setAnswer }: { answers: Answers; setAns
         <optgroup label="Available">
           {DATASET_OPTIONS.map((d) => (<option key={d} value={d} className="text-neutral-900">{d}</option>))}
         </optgroup>
-        {(a.ds_dataset || "").trim() && !DATASET_OPTIONS.includes((a.ds_dataset || "").trim()) ? (
-          <optgroup label="Set by assistant">
-            <option value={(a.ds_dataset || "").trim()} className="text-neutral-900">{(a.ds_dataset || "").trim()}</option>
-          </optgroup>
-        ) : null}
       </select>
       <p className="mt-1.5 text-xs text-neutral-400">Pick one of the built-in datasets.</p>
     </div>
@@ -500,6 +511,22 @@ export function IvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer:
   const hasXaiProp = ivs.some((e) => e.factor === "xai_property");
   const mixedXaiProp = hasXaiProp && ivs.some((e) => e.factor && e.factor !== "xai_property");
 
+  // No duplicate factors: each factor may be used by only one IV. (Cognitive
+  // Parameters are exempt here — multiple cognitive IVs with different parameters
+  // are legitimate; duplicates of the same parameter are dropped on save.)
+  const usedElsewhere = (i: number, factorId: string) =>
+    factorId !== "cognitive" && ivs.some((e, j) => j !== i && e.factor === factorId);
+  const dupFactorLabels = (() => {
+    const seen = new Set<string>();
+    const dups = new Set<string>();
+    for (const e of ivs) {
+      if (!e.factor || e.factor === "cognitive") continue;
+      if (seen.has(e.factor)) dups.add(e.label || e.factor);
+      seen.add(e.factor);
+    }
+    return Array.from(dups);
+  })();
+
   // One-time migration from the old single-IV fields.
   useEffect(() => {
     if (!a.sd_ivs && a.sd_iv_factor) {
@@ -580,10 +607,13 @@ export function IvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer:
                   {grouped.map((g) => (
                     <optgroup key={g.group} label={g.group}>
                       {g.items.map((f) => {
-                        const blocked = f.id === "xai_property" ? hasOtherElsewhere(i) : hasXaiPropElsewhere(i);
+                        const xaiPropBlocked = f.id === "xai_property" ? hasOtherElsewhere(i) : hasXaiPropElsewhere(i);
+                        const dupBlocked = !xaiPropBlocked && usedElsewhere(i, f.id);
+                        const blocked = xaiPropBlocked || dupBlocked;
+                        const suffix = xaiPropBlocked ? " (not combinable)" : dupBlocked ? " (already used)" : "";
                         return (
-                          <option key={f.id} value={f.id} disabled={blocked} title={blocked ? "XAI Property cannot be combined with other IVs" : f.def} className="text-neutral-900">
-                            {f.label}{blocked ? " (not combinable)" : ""}
+                          <option key={f.id} value={f.id} disabled={blocked} title={xaiPropBlocked ? "XAI Property cannot be combined with other IVs" : dupBlocked ? "This factor is already used by another IV" : f.def} className="text-neutral-900">
+                            {f.label}{suffix}
                           </option>
                         );
                       })}
@@ -616,6 +646,9 @@ export function IvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer:
 
         {mixedXaiProp ? (
           <p className="text-sm font-medium text-red-600">XAI Property cannot be combined with other independent variables — remove one of them.</p>
+        ) : null}
+        {dupFactorLabels.length ? (
+          <p className="text-sm font-medium text-red-600">Duplicate independent variables: {dupFactorLabels.join(", ")} — each factor can only be used once; remove the duplicate.</p>
         ) : null}
 
         <div className="flex flex-wrap items-center gap-2">

@@ -76,8 +76,9 @@ Field ids you can fill or modify (anywhere in the form):
     • Binary factors (Tested with XAI): you may omit "levels" (the two levels are implied).
     • Cognitive Parameters: give "cogParam" (e.g. "Retrieval Threshold") plus "levels" as an array of the specific values to test (e.g. [-2, 0, 2]).
     • "balancing" is one of: "None", "Randomized order", "Full counterbalancing", "Latin square" — only meaningful for Within-subjects.
+    • NO DUPLICATE FACTORS: each factor may be used by at most one IV (duplicates are dropped automatically). Exception: "Cognitive Parameters" may appear more than once only with different cogParam values.
   Only set sd_ivs when the user has clearly described the manipulation; otherwise ask.
-- sd_dv — dependent variables. One item: { "measure": "<catalog label or 'custom'>", "name": "<only for custom>", "formula": "<precise calculation, for custom>" }. Catalog measures (use the label): "Task Accuracy", "Decision Time", "Appropriate Reliance", "Agreement Rate", "Trust", "Confidence", "Mental Workload (NASA-TLX)", "Satisfaction / Preference", "Forward-Simulation Accuracy", "Counterfactual-Simulation Accuracy", "Comprehension Score". For a user-defined DV use {"measure":"custom","name":"…","formula":"…"}. Edit with ops.
+- sd_dv — dependent variables. One item: { "measure": "<catalog label or 'custom'>", "name": "<only for custom>", "formula": "<precise calculation, for custom>" }. The toolkit supports ONLY these catalog measures (use the label): "Forward-Simulation Accuracy", "Counterfactual-Simulation Accuracy". For anything else the user asks for, use a custom DV {"measure":"custom","name":"…","formula":"…"} and note it isn't computed by the toolkit. Edit with ops.
 - sd_cv — control variables. One item: { "name": "…", "type": "…" }. type is free text; common: Numerical (continuous), Categorical (nominal), Ordinal, Binary, Count. Edit with ops.
 - sd_rv — random variables (same item shape as sd_cv). Edit with ops.
 - sd_participants (number string) — participants per condition

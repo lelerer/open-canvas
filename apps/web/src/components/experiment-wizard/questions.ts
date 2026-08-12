@@ -35,11 +35,6 @@ export const DATASET_OPTIONS = [
   "Mushroom",
   "Wine Quality",
   "Forest Cover",
-  "Breast Cancer",
-  "Heart Disease",
-  "King County House",
-  "Pima Diabetes",
-  "Cardiotocography",
 ];
 
 // ---- User models (cognitive models + comparison baselines) ----
@@ -173,7 +168,6 @@ export const IV_CATALOG: IvFactor[] = [
       CoXAM: ["Mushroom (CoXAM only)", "Wine Quality", "Forest Cover"],
       Sim2Real: ["Wine Quality", "Forest Cover"],
     },
-    note: "Untested: Breast Cancer, Heart Disease, King County House, Pima Diabetes, Cardiotocography.",
   },
   { id: "ai_model", label: "AI Model", kind: "categorical", group: "Data & Model", def: "The underlying predictive model being explained.", levels: ["MLP", "XGBoost"], note: "Usually controlled by dataset." },
 
@@ -295,19 +289,10 @@ export interface DvMeasure {
 
 export const DV_GROUP_ORDER = ["Behavioural", "Subjective", "Understanding", "Custom"];
 
-// NOTE: this list is a sensible default — edit to match what the toolkit actually computes.
+// Only the measures the toolkit actually supports.
 export const DV_CATALOG: DvMeasure[] = [
-  { id: "task_accuracy", label: "Task Accuracy", group: "Behavioural", def: "Proportion of correct decisions." },
-  { id: "decision_time", label: "Decision Time", group: "Behavioural", def: "Time taken per decision (seconds)." },
-  { id: "appropriate_reliance", label: "Appropriate Reliance", group: "Behavioural", def: "Following the AI when it's right, overriding when it's wrong." },
-  { id: "agreement_rate", label: "Agreement Rate", group: "Behavioural", def: "How often the user agrees with the AI." },
-  { id: "trust", label: "Trust", group: "Subjective", def: "Self-reported trust (e.g. Likert)." },
-  { id: "confidence", label: "Confidence", group: "Subjective", def: "Self-reported confidence in decisions." },
-  { id: "workload", label: "Mental Workload (NASA-TLX)", group: "Subjective", def: "Perceived cognitive load." },
-  { id: "satisfaction", label: "Satisfaction / Preference", group: "Subjective", def: "Self-reported satisfaction or preference." },
   { id: "forward_sim", label: "Forward-Simulation Accuracy", group: "Understanding", def: "How well the user predicts the AI's output." },
   { id: "counterfactual_sim", label: "Counterfactual-Simulation Accuracy", group: "Understanding", def: "Predicting the AI's output under changes." },
-  { id: "comprehension", label: "Comprehension Score", group: "Understanding", def: "Objective measure of understanding." },
 ];
 
 export interface DvEntry {
@@ -479,9 +464,24 @@ export function ivEntryFromSpec(spec: any, agent: string): IvEntry | null {
   return { factor: f.id, label: f.label, levels: use.join(" | "), alloc, balancing };
 }
 
+// Each factor may be used by at most ONE IV (a duplicate "Dataset" IV is a design
+// error). Cognitive Parameters are keyed per parameter — two cognitive IVs are fine
+// as long as they manipulate different parameters. Keeps the first occurrence.
+export function dedupeIvEntries(list: IvEntry[]): IvEntry[] {
+  const seen = new Set<string>();
+  const out: IvEntry[] = [];
+  for (const e of list) {
+    const key = e.factor === "cognitive" ? `cognitive:${(e.cogParam || "").toLowerCase()}` : e.factor;
+    if (e.factor && seen.has(key)) continue;
+    if (e.factor) seen.add(key);
+    out.push(e);
+  }
+  return out;
+}
+
 export function normalizeIvSpecs(specs: any, agent: string): IvEntry[] {
   if (!Array.isArray(specs)) return [];
-  return specs.map((s) => ivEntryFromSpec(s, agent)).filter((e): e is IvEntry => !!e);
+  return dedupeIvEntries(specs.map((s) => ivEntryFromSpec(s, agent)).filter((e): e is IvEntry => !!e));
 }
 
 // DV specs from chat: { measure?: catalog id/label or "custom", name?, formula?, unit? }
