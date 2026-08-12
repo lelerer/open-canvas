@@ -35,11 +35,6 @@ export const DATASET_OPTIONS = [
   "Mushroom",
   "Wine Quality",
   "Forest Cover",
-  "Breast Cancer",
-  "Heart Disease",
-  "King County House",
-  "Pima Diabetes",
-  "Cardiotocography",
 ];
 
 // ---- User models (cognitive models + comparison baselines) ----
@@ -61,8 +56,13 @@ export function parseIdList(raw: string | undefined): string[] {
   return s.split(",").map((x) => x.trim()).filter(Boolean);
 }
 
+// The CoAX variant for XAI-Property designs. It runs on the Sim2Real
+// synthetic-AI interface, so it resolves to the "Sim2Real" IV/cognitive agent.
+export const COAX_XAI_PROPERTY = "CoAX (XAI Property)";
+
 export const USER_MODELS: UserModel[] = [
   { id: "CoAX", name: "CoAX", full: "Interpreting Attribution XAI", description: "A cognitive user model of how people interpret attribution-based explanations (e.g. LIME / SHAP feature attributions).", category: "Cognitive model" },
+  { id: COAX_XAI_PROPERTY, name: "Sim2Real", full: "Interpreting XAI with Different Properties", description: "The CoAX model for XAI-Property designs — how people interpret explanations that are faithful, sparse, robust or sparse_robust. Runs on the Sim2Real synthetic-AI interface.", category: "Cognitive model" },
   { id: "CoXAM", name: "CoXAM", full: "Interpreting Global XAI (Rules vs Weights)", description: "A cognitive user model of how people interpret global surrogate explanations — decision-tree rules vs logistic-regression weights.", category: "Cognitive model" },
   // Comparison baselines (simple standard models run alongside for comparison):
   { id: "KNN", name: "KNN", full: "k-Nearest Neighbours", description: "A simple, standard model used as a comparison baseline. Works with both CoAX and CoXAM.", category: "Comparison baseline" },
@@ -84,10 +84,19 @@ export const BALANCING_METHODS = [
 // ---- IV catalog (levels depend on the model/framework) ----
 export const IV_AGENTS = ["CoAX", "CoXAM", "Sim2Real"] as const;
 
+export type CogParamType = "float" | "integer" | "enum";
+
 export interface CognitiveParam {
-  name: string;
-  min: number;
-  max: number;
+  name: string; // display label — also the key used inside cog_config
+  key?: string; // backend parameter name (e.g. "max_features_attended"); derived from `name` when absent
+  type?: CogParamType; // default "float"
+  min?: number; // numeric types only
+  max?: number;
+  step?: number; // input granularity for numeric types
+  options?: string[]; // enum only
+  default?: string | number; // recommended starting value (what the wizard suggests)
+  modelDefault?: string | number; // what the model itself uses when left blank
+  softBounds?: boolean; // the backend accepts any value — min/max is an advisory window
   note?: string;
 }
 
@@ -159,7 +168,6 @@ export const IV_CATALOG: IvFactor[] = [
       CoXAM: ["Mushroom (CoXAM only)", "Wine Quality", "Forest Cover"],
       Sim2Real: ["Wine Quality", "Forest Cover"],
     },
-    note: "Untested: Breast Cancer, Heart Disease, King County House, Pima Diabetes, Cardiotocography.",
   },
   { id: "ai_model", label: "AI Model", kind: "categorical", group: "Data & Model", def: "The underlying predictive model being explained.", levels: ["MLP", "XGBoost"], note: "Usually controlled by dataset." },
 
@@ -171,19 +179,53 @@ export const IV_CATALOG: IvFactor[] = [
     def: "Parameters of the cognitive user model (memory, attention, etc.).",
     cognitiveByAgent: {
       CoAX: [
-        { name: "Retrieval Threshold", min: -2.3, max: -1.5, note: "Memory capacity; higher = harder retrieval / more forgetting." },
-        { name: "Exemplar Distance Sensitivity", min: 1, max: 10, note: "How strongly distance affects similarity." },
+        { name: "Retrieval Threshold", min: -4.0, max: -0.97, note: "Memory capacity; higher = harder retrieval / more forgetting." },
+        { name: "Exemplar Distance Sensitivity", min: 1, max: 20, note: "How strongly distance affects similarity." },
         { name: "Attended Features", min: 1, max: 5, note: "Attention span — features attended when comparing exemplars." },
-        { name: "Feature-Class Sensitivity", min: 1, max: 7, note: "How strongly attribution maps to classes." },
+        { name: "Feature-Class Sensitivity", min: 1, max: 8, note: "How strongly attribution maps to classes." },
       ],
       CoXAM: [
-        { name: "Retrieval Threshold", min: -2.8, max: -1.5, note: "How easily info is retrieved from memory." },
-        { name: "Opportunity Cost", min: 0, max: 10, note: "Accuracy-time tradeoff (computational rationality / RL)." },
-        { name: "Diffusion Noise", min: 0, max: 1, note: "Stochasticity during forward simulation." },
-        { name: "Counterfactual Margin", min: 0, max: 1, note: "Margin when evaluating counterfactual changes." },
+        // The valid range depends on the user task, so the field spans both; the
+        // note carries the per-task window and default.
+        { name: "Retrieval Threshold", key: "memory_recall_threshold", type: "float", min: -2.0, max: 2.0, step: 0.05, note: "How easily info is retrieved from memory. Valid range depends on the task — forward simulation: -1.0 to 2.0 (default 0.5); counterfactual simulation: -2.0 to 0.5 (default -0.75)." },
+        { name: "Opportunity Cost", key: "opportunity_cost", type: "float", min: 0.0, max: 0.02, step: 0.001, default: 0.01, note: "Accuracy-time tradeoff (computational rationality / RL). Forward simulation only." },
+        { name: "Diffusion Noise", key: "decision_noise", type: "float", min: 0.3, max: 0.7, step: 0.01, default: 0.4, note: "Stochasticity during forward simulation. Forward simulation only." },
+        { name: "Counterfactual Margin", key: "counterfactual_overshoot_fraction", type: "float", min: 0.0, max: 0.5, step: 0.01, default: 0.25, note: "Margin when evaluating counterfactual changes. Counterfactual simulation only." },
       ],
+      // CoAX (XAI Property) — the Sim2Real synthetic-AI study.
       Sim2Real: [
-        { name: "Memory / cognitive budget", min: 0, max: 0, note: "Top-2 features vs all features." },
+        {
+          name: "Max Features Attended",
+          key: "max_features_attended",
+          type: "integer",
+          min: 1,
+          max: 12,
+          step: 1,
+          default: 4,
+          modelDefault: 12,
+          note: "How many explanation features the simulated user attends to. The model itself defaults to all 12; 4 is the value that best matches the measured behaviour.",
+        },
+        {
+          name: "Aggregation Strategy",
+          key: "aggregation_strategy",
+          type: "enum",
+          options: ["attribution", "value_weighted"],
+          default: "value_weighted",
+          modelDefault: "attribution",
+          note: "How evidence from the attended features is combined into a decision.",
+        },
+        {
+          name: "Confidence Responsiveness",
+          key: "confidence_responsiveness",
+          type: "float",
+          min: -3.0,
+          max: 1.0,
+          step: 0.1,
+          default: -1.5,
+          modelDefault: 0.0,
+          softBounds: true,
+          note: "Applies to all aggregation strategies. Lower = more responsive to the change. The backend accepts any float; −3.0 to 1.0 is the evidence-supported window, with the optimum at −1.5 (flat between −2.0 and −1.0), which is most accurate to the measured effect.",
+        },
       ],
     },
   },
@@ -247,19 +289,10 @@ export interface DvMeasure {
 
 export const DV_GROUP_ORDER = ["Behavioural", "Subjective", "Understanding", "Custom"];
 
-// NOTE: this list is a sensible default — edit to match what the toolkit actually computes.
+// Only the measures the toolkit actually supports.
 export const DV_CATALOG: DvMeasure[] = [
-  { id: "task_accuracy", label: "Task Accuracy", group: "Behavioural", def: "Proportion of correct decisions." },
-  { id: "decision_time", label: "Decision Time", group: "Behavioural", def: "Time taken per decision (seconds)." },
-  { id: "appropriate_reliance", label: "Appropriate Reliance", group: "Behavioural", def: "Following the AI when it's right, overriding when it's wrong." },
-  { id: "agreement_rate", label: "Agreement Rate", group: "Behavioural", def: "How often the user agrees with the AI." },
-  { id: "trust", label: "Trust", group: "Subjective", def: "Self-reported trust (e.g. Likert)." },
-  { id: "confidence", label: "Confidence", group: "Subjective", def: "Self-reported confidence in decisions." },
-  { id: "workload", label: "Mental Workload (NASA-TLX)", group: "Subjective", def: "Perceived cognitive load." },
-  { id: "satisfaction", label: "Satisfaction / Preference", group: "Subjective", def: "Self-reported satisfaction or preference." },
   { id: "forward_sim", label: "Forward-Simulation Accuracy", group: "Understanding", def: "How well the user predicts the AI's output." },
   { id: "counterfactual_sim", label: "Counterfactual-Simulation Accuracy", group: "Understanding", def: "Predicting the AI's output under changes." },
-  { id: "comprehension", label: "Comprehension Score", group: "Understanding", def: "Objective measure of understanding." },
 ];
 
 export interface DvEntry {
@@ -431,9 +464,24 @@ export function ivEntryFromSpec(spec: any, agent: string): IvEntry | null {
   return { factor: f.id, label: f.label, levels: use.join(" | "), alloc, balancing };
 }
 
+// Each factor may be used by at most ONE IV (a duplicate "Dataset" IV is a design
+// error). Cognitive Parameters are keyed per parameter — two cognitive IVs are fine
+// as long as they manipulate different parameters. Keeps the first occurrence.
+export function dedupeIvEntries(list: IvEntry[]): IvEntry[] {
+  const seen = new Set<string>();
+  const out: IvEntry[] = [];
+  for (const e of list) {
+    const key = e.factor === "cognitive" ? `cognitive:${(e.cogParam || "").toLowerCase()}` : e.factor;
+    if (e.factor && seen.has(key)) continue;
+    if (e.factor) seen.add(key);
+    out.push(e);
+  }
+  return out;
+}
+
 export function normalizeIvSpecs(specs: any, agent: string): IvEntry[] {
   if (!Array.isArray(specs)) return [];
-  return specs.map((s) => ivEntryFromSpec(s, agent)).filter((e): e is IvEntry => !!e);
+  return dedupeIvEntries(specs.map((s) => ivEntryFromSpec(s, agent)).filter((e): e is IvEntry => !!e));
 }
 
 // DV specs from chat: { measure?: catalog id/label or "custom", name?, formula?, unit? }
@@ -560,6 +608,53 @@ export const PAGES: Page[] = [
 export function cognitiveParamsFor(agent: string): CognitiveParam[] {
   const f = IV_CATALOG.find((x) => x.kind === "cognitive");
   return (f?.cognitiveByAgent && f.cognitiveByAgent[agent]) || [];
+}
+
+export function cogParamType(p: CognitiveParam): CogParamType {
+  return p.type ?? "float";
+}
+
+// Backend parameter name — explicit `key`, else a snake_case slug of the label.
+export function cogParamKey(p: CognitiveParam): string {
+  return p.key ?? p.name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+export function cogParamRange(p: CognitiveParam): { min: number; max: number } | null {
+  if (typeof p.min !== "number" || typeof p.max !== "number" || p.min >= p.max) return null;
+  return { min: p.min, max: p.max };
+}
+
+// null when the value is fine. "error" blocks (the backend would reject it);
+// "warn" is advisory — a soft-bounded parameter outside its supported window.
+export function cogParamIssue(p: CognitiveParam, raw: string): { level: "error" | "warn"; message: string } | null {
+  const v = (raw || "").trim();
+  if (!v) return null;
+  if (cogParamType(p) === "enum") {
+    return p.options && !p.options.includes(v) ? { level: "error", message: `Choose one of: ${p.options.join(", ")}.` } : null;
+  }
+  const n = Number(v);
+  if (!Number.isFinite(n)) return { level: "error", message: "Enter a number." };
+  if (cogParamType(p) === "integer" && !Number.isInteger(n)) return { level: "error", message: "Enter a whole number." };
+  const r = cogParamRange(p);
+  if (r && (n < r.min || n > r.max)) {
+    return p.softBounds
+      ? { level: "warn", message: `Outside the evidence-supported window (${r.min} to ${r.max}) — accepted, but untested.` }
+      : { level: "error", message: `Value must be between ${r.min} and ${r.max}.` };
+  }
+  return null;
+}
+
+// The cognitive/IV agent behind a user model — "" for custom or unset models.
+export function cognitiveAgentFor(userModel: string | undefined): string {
+  const m = (userModel || "").trim();
+  if (m === COAX_XAI_PROPERTY) return "Sim2Real";
+  return (IV_AGENTS as readonly string[]).includes(m) ? m : "";
+}
+
+// The agent used to resolve IV levels: the explicit choice, else the one behind
+// the chosen user model, else CoAX.
+export function ivAgentFor(a: Answers): string {
+  return (a.sd_iv_agent || "").trim() || cognitiveAgentFor(a.user_model) || "CoAX";
 }
 
 // ---- Completeness ----
@@ -690,14 +785,121 @@ export function cogConfigSummary(a: Answers): string {
   return Object.entries(obj).filter(([, v]) => String(v).trim()).map(([k, v]) => `${k}=${v}`).join(", ");
 }
 
+export function parseCogConfig(a: Answers): Record<string, string> {
+  try {
+    const o = JSON.parse(a.cog_config || "{}");
+    return o && typeof o === "object" ? (o as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+// Cognitive parameters that are varied as an IV on the Study Design page
+// (parameter name → the levels being tested) — those are not fixed values.
+export function manipulatedCogParams(a: Answers): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const e of parseIvs(a)) {
+    if (e.factor === "cognitive" && e.cogParam) out[e.cogParam] = e.levels || "";
+  }
+  return out;
+}
+
+// Every cognitive parameter of the selected user model with the value actually
+// in play: the one the user set, the levels it is varied over, or the model's
+// own default. This is what the design JSON exports.
+export interface ResolvedCogParam {
+  key: string;
+  label: string;
+  type: CogParamType;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: string[];
+  recommendedDefault?: string | number;
+  modelDefault?: string | number;
+  value: string | number | null; // null when varied as an IV
+  levels?: string; // the levels tested, when varied as an IV
+  source: "set" | "manipulated" | "model default";
+  softBounds?: boolean;
+  note?: string;
+}
+
+export function resolvedCogParams(a: Answers): ResolvedCogParam[] {
+  const agent = cognitiveAgentFor(a.user_model);
+  if (!agent) return [];
+  const cfg = parseCogConfig(a);
+  const manipulated = manipulatedCogParams(a);
+  const coerce = (p: CognitiveParam, v: string | number | undefined): string | number | null => {
+    if (v === undefined || v === null || String(v).trim() === "") return null;
+    if (cogParamType(p) === "enum") return String(v);
+    const n = Number(v);
+    return Number.isFinite(n) ? n : String(v);
+  };
+
+  return cognitiveParamsFor(agent).map((p) => {
+    const manip = manipulated[p.name];
+    const set = (cfg[p.name] ?? "").trim();
+    const base: ResolvedCogParam = {
+      key: cogParamKey(p),
+      label: p.name,
+      type: cogParamType(p),
+      ...(typeof p.min === "number" ? { min: p.min } : {}),
+      ...(typeof p.max === "number" ? { max: p.max } : {}),
+      ...(p.step !== undefined ? { step: p.step } : {}),
+      ...(p.options ? { options: p.options } : {}),
+      ...(p.default !== undefined ? { recommendedDefault: p.default } : {}),
+      ...(p.modelDefault !== undefined ? { modelDefault: p.modelDefault } : {}),
+      ...(p.softBounds ? { softBounds: true } : {}),
+      ...(p.note ? { note: p.note } : {}),
+      value: null,
+      source: "model default",
+    };
+    if (manip !== undefined) return { ...base, value: null, levels: manip, source: "manipulated" };
+    if (set) return { ...base, value: coerce(p, set), source: "set" };
+    return { ...base, value: coerce(p, p.modelDefault), source: "model default" };
+  });
+}
+
+export function cogParamsSummaryLines(a: Answers): string[] {
+  return resolvedCogParams(a).map((p) => {
+    if (p.source === "manipulated") return `${p.label} (${p.key}): manipulated as an IV — ${p.levels || "(no levels set)"}`;
+    if (p.value === null) return `${p.label} (${p.key}): (model default)`;
+    return `${p.label} (${p.key}): ${p.value}${p.source === "model default" ? " (model default)" : ""}`;
+  });
+}
+
+export const DEFAULT_TRAINING_TRIALS = 10;
+export const DEFAULT_TESTING_TRIALS = 20;
+
+// Trials per participant, split into the training (feedback shown) and testing
+// phases. Designs saved before the split carry a single sd_trials total; those
+// are reported as all-testing so their totals stay unchanged.
+export function trialSplit(a: Answers): { training: number; testing: number; total: number } {
+  const num = (s: string | undefined) => {
+    const n = parseInt((s ?? "").trim(), 10);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  };
+  const training = num(a.sd_trials_training);
+  const testing = num(a.sd_trials_testing);
+  if (training !== null || testing !== null) {
+    const tr = training ?? DEFAULT_TRAINING_TRIALS;
+    const te = testing ?? DEFAULT_TESTING_TRIALS;
+    return { training: tr, testing: te, total: tr + te };
+  }
+  const legacy = num(a.sd_trials);
+  if (legacy !== null) return { training: 0, testing: legacy, total: legacy };
+  return { training: DEFAULT_TRAINING_TRIALS, testing: DEFAULT_TESTING_TRIALS, total: DEFAULT_TRAINING_TRIALS + DEFAULT_TESTING_TRIALS };
+}
+
 export function participantTotals(a: Answers) {
   const ivs = parseIvs(a);
   const per = parseInt(a.sd_participants || "", 10) || 0;
   const between = betweenCells(ivs) || 1;
   const cells = totalCells(ivs);
   const totalP = per * between;
-  const trials = parseInt(a.sd_trials || "10", 10) || 10;
-  return { per, between, cells, totalP, trials, totalTrials: totalP * trials };
+  const split = trialSplit(a);
+  const trials = split.total;
+  return { per, between, cells, totalP, trials, training: split.training, testing: split.testing, totalTrials: totalP * trials };
 }
 
 // ---- Apparatus configurations (saved per condition/group) ----
@@ -840,7 +1042,7 @@ export function studyNaturalSize(mode: string, params: Record<string, string>): 
 }
 
 export function elementsOf(p: Record<string, string>): string[] {
-  const raw = p.elements != null ? p.elements : p.widgets != null ? p.widgets : "instance,xai,prediction";
+  const raw = p.elements != null ? p.elements : p.widgets != null ? p.widgets : "instance,meters,xai,prediction";
   const els = raw.split(",").map((s) => s.trim()).filter(Boolean).map((k) => (k === "simulation" ? "sliders" : k));
   // "Data instance" is always shown — it cannot be deselected (also repairs
   // older saved configs and chat-set element lists that omitted it).
@@ -863,6 +1065,41 @@ export function instanceRangeFor(p: Record<string, string>): { min: number; max:
   if (namespaceOf(p) === "global") return { min: 0, max: 399 };
   const ds = STUDY_DATASETS.find((d) => d.appId === (p.appId || "wine_quality"));
   return { min: 0, max: ds ? ds.localMax : 299 };
+}
+
+// Default train/test split for a Sim2Real (XAI Property) apparatus: the first
+// SIM2REAL_TRAIN_COUNT instances train, every remaining one tests (0-9 and
+// 10-38 over its 0–38 corpus). Derived from the range so it stays correct if
+// the corpus size changes.
+export const SIM2REAL_TRAIN_COUNT = 10;
+
+export function defaultSim2realInstanceIds(): { trainingInstanceIds: string; instanceIds: string } {
+  const { min, max } = instanceRangeFor({ appId: "adult_sim2real" });
+  const trainEnd = Math.min(min + SIM2REAL_TRAIN_COUNT - 1, max);
+  return {
+    trainingInstanceIds: `${min}-${trainEnd}`,
+    instanceIds: trainEnd < max ? `${trainEnd + 1}-${max}` : "",
+  };
+}
+
+// What is left for the test set once the training instances are taken: the
+// configured range narrowed past any training ids at either end, how many ids
+// are spoken for, and any id used in BOTH lists (which would test a participant
+// on an instance they already practised).
+export function testInstanceHint(p: Record<string, string>): {
+  min: number;
+  max: number;
+  reserved: number;
+  overlap: string[];
+} {
+  const range = instanceRangeFor(p);
+  const train = new Set(trainingInstanceIdsOf(p));
+  let min = range.min;
+  while (min <= range.max && train.has(String(min))) min++;
+  let max = range.max;
+  while (max >= min && train.has(String(max))) max--;
+  const overlap = instanceIdsOf(p).filter((id) => train.has(id));
+  return { min, max, reserved: train.size, overlap };
 }
 
 // NOTE: expMethod is intentionally NOT defaulted here — its default depends on the
@@ -958,6 +1195,151 @@ export function normalizeApparatusList(arr: any): ApparatusEntry[] {
 }
 export function parseApparatusList(a: Answers): ApparatusEntry[] {
   try { return normalizeApparatusList(JSON.parse(a.apparatus_list || "[]")); } catch { return []; }
+}
+
+// ---- Replaying a simulated trial on the study interface ----
+
+// One simulated result row, reduced to what picking an interface URL needs.
+export interface TrialUrlSpec {
+  instanceId: string;
+  phase: string; // "training" | "testing"
+  condition: string; // condition_name / withinCondition
+  shownXaiType: string; // the condition's explanation type (never "none")
+  datasetId: string; // dataId
+  explanationType?: string; // explanation_type: "dt" / "lr" / "none"
+  xaiType?: string; // the condition's assigned type, as a fallback
+  testedWithXai?: boolean | null; // tested_w_xai — testing rows only
+  xaiProperty?: string; // Sim2Real: faithful / sparse / robust / sparse_robust
+}
+
+// The apparatus config a trial was run under: the one whose group matches the
+// trial's actual condition/dataset, else the "All participants" entry, else
+// the only one.
+//
+// A group can name more than one between-subjects factor —
+// participantGroups() joins one "Factor = Level" segment per between-subjects
+// IV with " · " (e.g. "Dataset = wine_quality · XAI Type = Decision Tree") —
+// so every segment has to match, not just the group string as a whole; the
+// old single-"=" split only ever worked for a one-factor group and silently
+// fell through to the first/"All participants" entry otherwise. `condition`
+// (built off condition_name/xai_type/withinCondition — see trialViewOf) never
+// encodes dataset, so a "Dataset = …" segment is checked against `datasetId`
+// instead, and everything else against `condition`.
+export function apparatusForTrial(entries: ApparatusEntry[], t: { condition: string; datasetId?: string }): ApparatusEntry | undefined {
+  if (entries.length <= 1) return entries[0];
+  const wantCondition = slugId(t.condition);
+  const wantDataset = slugId(t.datasetId || "");
+  let best: { e: ApparatusEntry; score: number } | null = null;
+  for (const e of entries) {
+    const g = (e.group || "").trim();
+    if (!g || g === "All participants") continue;
+    const segments = g.split("·").map((seg) => seg.trim()).filter(Boolean);
+    if (!segments.length) continue;
+    let matched = 0;
+    for (const seg of segments) {
+      const eq = seg.indexOf("=");
+      const factor = eq >= 0 ? seg.slice(0, eq).trim() : "";
+      const level = eq >= 0 ? seg.slice(eq + 1).trim() : seg;
+      const want = /dataset/i.test(factor) ? wantDataset : wantCondition;
+      if (want && slugId(level) === want) matched++;
+    }
+    // Every segment of the group must match — a partial match (e.g. right
+    // dataset, wrong XAI type) is the wrong config, not a close-enough one.
+    if (matched === segments.length && (!best || matched > best.score)) best = { e, score: matched };
+  }
+  if (best) return best.e;
+  return entries.find((e) => !e.group || e.group === "All participants") ?? entries[0];
+}
+
+/**
+ * Did this trial actually show an explanation?
+ *
+ * `tested_w_xai` is the authoritative flag but only exists on TESTING rows —
+ * training trials always show the explanation, so it is null there.
+ * `explanation_type` backs it up: "none" when no explanation was rendered,
+ * "dt"/"lr" otherwise, on both phases.
+ *
+ * `shown_xai_type` is NOT usable for this: it names the condition's explanation
+ * type and stays "decision_tree"/"logistic_regression" even on a without-XAI
+ * trial.
+ */
+export function trialShowedXai(t: { testedWithXai?: boolean | null; explanationType?: string; shownXaiType?: string }): boolean {
+  if (typeof t.testedWithXai === "boolean") return t.testedWithXai;
+  const e = (t.explanationType || "").trim().toLowerCase();
+  if (e) return e !== "none";
+  // CoAX rows carry no explanation_type, and their "None" condition shows up as
+  // shown_xai_type "none" — the only signal left, so it is trusted last.
+  const s = (t.shownXaiType || "").trim().toLowerCase();
+  if (s) return s !== "none";
+  return true;
+}
+
+// A result row names its explanation in the runner's vocabulary
+// (shown_xai_type "decision_tree", explanation_type "dt"); the interface needs
+// an EXPLANATION_FORMS id. "" when the row says nothing recognisable, in which
+// case the apparatus config's own form stands.
+const ROW_FORM_IDS: Record<string, string> = {
+  decision_tree: "DT", dt: "DT", tree: "DT",
+  logistic_regression: "LR", lr: "LR", weights: "LR", logreg: "LR",
+  attribution: "attribution", attributions: "attribution", local: "attribution",
+  importance: "importance", feature_importance: "importance",
+};
+
+export function trialFormId(t: { shownXaiType?: string; explanationType?: string; xaiType?: string }): string {
+  // explanation_type first — it is what was actually rendered. On a without-XAI
+  // trial it reads "none", which maps to nothing and falls through to the
+  // condition's type, so the right renderer is still chosen with XAI hidden.
+  for (const raw of [t.explanationType, t.shownXaiType, t.xaiType]) {
+    const v = (raw || "").trim().toLowerCase();
+    if (v && ROW_FORM_IDS[v]) return ROW_FORM_IDS[v];
+  }
+  return "";
+}
+
+/**
+ * The study-interface URL that replays one simulated trial.
+ *
+ * Everything the user configured on the Apparatus page (form, method, widgets,
+ * LR/DT settings) is kept; only what the row dictates is overridden — the
+ * instance, whether it was a training trial, and whether XAI was shown. That is
+ * why this starts from the apparatus entry instead of rebuilding params from
+ * result columns.
+ */
+export function trialStudyUrl(root: string, entry: ApparatusEntry | undefined, t: TrialUrlSpec): string {
+  const base: Record<string, string> = { ...STUDY_PARAM_DEFAULTS, ...(entry?.params ?? {}) };
+  // A Sim2Real row names the property it showed, and that screen only exists
+  // under adult_sim2real — its dataId says "adult", which would otherwise point
+  // at the local renderer.
+  const property = EXPLANATION_PROPERTIES.includes((t.xaiProperty || "").trim()) ? (t.xaiProperty as string).trim() : "";
+  if (property && !entry?.params?.appId) base.appId = "adult_sim2real";
+  else if (t.datasetId && !entry?.params?.appId) base.appId = t.datasetId;
+  const p: Record<string, string> = {
+    ...base,
+    instanceId: t.instanceId,
+    trainingMode: t.phase === "training" ? "1" : "0",
+  };
+  // The row decides which explanation was actually shown, not the apparatus
+  // config: a design that varies XAI Type runs several forms through one
+  // config, so trusting the config would render LR weights for a DT trial.
+  // namespaceOf() follows the form, so this also picks the right renderer.
+  const rowForm = trialFormId(t);
+  if (rowForm) p.form = rowForm;
+  // Sim2Real reuses expMethod to carry the property condition, and it changes
+  // per trial — the apparatus config would pin every trial to one property.
+  if (property) p.expMethod = property;
+  // The element list drives what the existing builder emits, so the two things a
+  // trial dictates are expressed here rather than by changing buildStudyUrl:
+  //   - a without-XAI trial drops "xai" so the explanation is hidden;
+  //   - a TEST trial drops "prediction", because revealing the AI's answer is
+  //     feedback and belongs to training only. An empty element list means
+  //     "show everything", so it is seeded from the defaults before filtering.
+  const training = t.phase === "training";
+  const showXai = trialShowedXai(t);
+  if (!showXai || !training) {
+    const els = elementsOf(base).filter((k) => (showXai || k !== "xai") && (training || k !== "prediction"));
+    p.elements = els.length ? els.join(",") : "instance";
+  }
+  return buildStudyUrl(root, p);
 }
 
 // ---- Participant groups (the actual between-subjects cells) ----

@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { PAGES, Answers, Page, isPageComplete, totalCells, normalizeIvSpecs, normalizeDvSpecs, normalizeVarSpecs, normalizeProcSpecs, normalizeApparatusList } from "./questions";
 import { ACCENT } from "./wizardUi";
 import { GLOBAL_OPENING, ChatMsg, ApplyPayload, ALL_FILLABLE, applyOneOp, ivAgentOf, buildChatContext, ChatPanel } from "./wizardChat";
-import { TextBody, ApparatusBody, ProcedureBody, UserModelBody, ResultsBody } from "./wizardPages";
+import { TextBody, ApparatusBody, ProcedureBody, UserModelBody, ResultsBody, clearCachedRunOutcome } from "./wizardPages";
 import { StudyDesignBody } from "./wizardStudyDesign";
 import { ReviewPage } from "./wizardReview";
 
@@ -44,6 +44,7 @@ export function ExperimentWizard() {
   function resetExperiment() {
     if (!window.confirm("Start a new experiment? This clears all saved answers and the assistant chat on this device.")) return;
     try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+    clearCachedRunOutcome();
     setAnswers({});
     setStep(0);
     setMessages([{ role: "assistant", content: GLOBAL_OPENING }]);

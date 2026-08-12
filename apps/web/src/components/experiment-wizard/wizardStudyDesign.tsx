@@ -9,6 +9,8 @@ import {
   ALLOC_OPTIONS, BALANCING_METHODS, parseIvs, totalCells, betweenCells, validateParticipants,
   participantGroups, withinCoverage, unsupportedIvLevels, ivFactorUnsupportedByAgent,
   DATASET_OPTIONS, DV_CATALOG, DV_GROUP_ORDER, DvEntry, parseDvs, Variable, parseVars,
+  ivAgentFor, cogParamType, cogParamRange,
+  trialSplit, DEFAULT_TRAINING_TRIALS, DEFAULT_TESTING_TRIALS,
 } from "./questions";
 
 export function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
@@ -52,10 +54,26 @@ export function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setA
           <VariableList valueKey="sd_rv" answers={answers} setAnswer={setAnswer} namePlaceholder="e.g. participant, stimulus order" />
         </div>
 
-        <div className="border-t border-neutral-100 pt-6">
-          <DocLabel>Dataset</DocLabel>
-          <DatasetPicker answers={answers} setAnswer={setAnswer} />
-        </div>
+        {(() => {
+          // When Dataset is manipulated as an IV, its levels define the datasets:
+          //  - Dataset is the ONLY IV → the picker below is redundant; hide it.
+          //  - other IVs exist too → keep the picker (it sets the dataset used by
+          //    the other IVs' trials) with a note clarifying its scope.
+          const datasetIsIv = ivs.some((e) => e.factor === "dataset");
+          const otherIvsExist = ivs.some((e) => e.factor && e.factor !== "dataset");
+          if (datasetIsIv && !otherIvsExist) return null;
+          return (
+            <div className="border-t border-neutral-100 pt-6">
+              <DocLabel>Dataset</DocLabel>
+              <DatasetPicker answers={answers} setAnswer={setAnswer} />
+              {datasetIsIv ? (
+                <p className="mt-1.5 text-xs text-amber-700" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+                  Dataset is also an independent variable — this selection applies only to the other IVs' trials; the Dataset IV compares the datasets chosen as its levels above.
+                </p>
+              ) : null}
+            </div>
+          );
+        })()}
 
         <div className="border-t border-neutral-100 pt-6">
           <DocLabel>Participants</DocLabel>
@@ -64,7 +82,8 @@ export function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setA
             const per = parseInt(a.sd_participants || "", 10) || 0;
             const between = betweenCells(ivs);
             const totalP = per * (between || 1);
-            const trials = parseInt(a.sd_trials || "10", 10) || 10;
+            const split = trialSplit(a);
+            const trials = split.total;
             const totalTrials = totalP * trials;
             return (
               <>
@@ -75,12 +94,14 @@ export function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setA
                 </p>
                 <p className="text-[15px] leading-8 text-neutral-800">
                   Each participant completes{" "}
-                  <input type="number" value={a.sd_trials ?? "10"} onChange={(e) => setAnswer("sd_trials", e.target.value)} placeholder="10" className={numCls} />{" "}
-                  trials.
+                  <input type="number" min={0} value={a.sd_trials_training ?? String(split.training)} onChange={(e) => setAnswer("sd_trials_training", e.target.value)} placeholder={String(DEFAULT_TRAINING_TRIALS)} className={numCls} />{" "}
+                  training trials and{" "}
+                  <input type="number" min={0} value={a.sd_trials_testing ?? String(split.testing)} onChange={(e) => setAnswer("sd_trials_testing", e.target.value)} placeholder={String(DEFAULT_TESTING_TRIALS)} className={numCls} />{" "}
+                  testing trials.
                 </p>
                 <div className="mt-2 rounded-lg bg-neutral-50 px-3 py-2 text-sm text-neutral-600" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
                   <div><span className="text-neutral-400">Total participants:</span> <span className="font-medium text-neutral-800">{totalP}</span> ({per} × {between || 1} between-subjects group{between === 1 ? "" : "s"}, {cells} cell{cells === 1 ? "" : "s"})</div>
-                  <div><span className="text-neutral-400">Total trials:</span> <span className="font-medium text-neutral-800">{totalTrials}</span> ({totalP} × {trials})</div>
+                  <div><span className="text-neutral-400">Total trials:</span> <span className="font-medium text-neutral-800">{totalTrials}</span> ({totalP} × {trials} = {split.training} training + {split.testing} testing)</div>
                 </div>
                 {check ? <p className={cn("mt-2 text-sm", checkColor)} style={{ fontFamily: "ui-sans-serif, system-ui" }}>{check.message}</p> : null}
 
@@ -270,7 +291,7 @@ export function DatasetPicker({ answers, setAnswer }: { answers: Answers; setAns
   return (
     <div style={{ fontFamily: "ui-sans-serif, system-ui" }}>
       <select
-        value={a.ds_dataset ?? ""}
+        value={DATASET_OPTIONS.includes((a.ds_dataset || "").trim()) ? (a.ds_dataset || "").trim() : ""}
         onChange={(e) => setAnswer("ds_dataset", e.target.value)}
         className={cn("min-w-[12rem] rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-400", a.ds_dataset ? "text-neutral-900" : "text-neutral-400")}
       >
@@ -278,11 +299,6 @@ export function DatasetPicker({ answers, setAnswer }: { answers: Answers; setAns
         <optgroup label="Available">
           {DATASET_OPTIONS.map((d) => (<option key={d} value={d} className="text-neutral-900">{d}</option>))}
         </optgroup>
-        {(a.ds_dataset || "").trim() && !DATASET_OPTIONS.includes((a.ds_dataset || "").trim()) ? (
-          <optgroup label="Set by assistant">
-            <option value={(a.ds_dataset || "").trim()} className="text-neutral-900">{(a.ds_dataset || "").trim()}</option>
-          </optgroup>
-        ) : null}
       </select>
       <p className="mt-1.5 text-xs text-neutral-400">Pick one of the built-in datasets.</p>
     </div>
@@ -311,7 +327,7 @@ export function AllocToggle({ value, onChange }: { value: string; onChange: (v: 
 }
 
 // Discrete numeric levels for range/cognitive IVs (e.g. "2, 8, 10" → 3 levels), each within [min,max].
-function NumericLevelsInput({ value, min, max, onChange }: { value: string; min: number; max: number; onChange: (levels: string) => void }) {
+function NumericLevelsInput({ value, min, max, soft, onChange }: { value: string; min: number; max: number; soft?: boolean; onChange: (levels: string) => void }) {
   const toRaw = (l: string) => l.split("|").map((s) => s.trim()).filter(Boolean).join(", ");
   const toLevels = (r: string) => r.split(",").map((s) => s.trim()).filter(Boolean).join(" | ");
   const [raw, setRaw] = useState(() => toRaw(value));
@@ -330,10 +346,14 @@ function NumericLevelsInput({ value, min, max, onChange }: { value: string; min:
           placeholder="e.g. 2, 8, 10"
           className="min-w-[12rem] flex-1 border-0 border-b border-neutral-200 bg-transparent px-0 py-0.5 text-[15px] text-neutral-900 outline-none placeholder:text-neutral-400 focus:border-neutral-500"
         />
-        <span className="text-neutral-400">(allowed {min}–{max})</span>
+        <span className="text-neutral-400">({soft ? "supported window" : "allowed"} {min}–{max})</span>
       </div>
       {nums.length ? <p className="mt-1 text-xs text-neutral-400">{nums.length} level{nums.length === 1 ? "" : "s"}: {nums.join(", ")}</p> : <p className="mt-1 text-xs text-neutral-400">Enter values separated by commas.</p>}
-      {bad.length ? <p className="mt-1 text-xs font-medium text-red-600">Each level must be a number between {min} and {max}. Check: {bad.join(", ")}.</p> : null}
+      {bad.length ? (
+        soft
+          ? <p className="mt-1 text-xs font-medium text-amber-700">Outside the evidence-supported window {min}–{max} (accepted, but untested): {bad.join(", ")}.</p>
+          : <p className="mt-1 text-xs font-medium text-red-600">Each level must be a number between {min} and {max}. Check: {bad.join(", ")}.</p>
+      ) : null}
     </div>
   );
 }
@@ -425,16 +445,31 @@ export function IvLevelEditor({ factor, entry, agent, onPatch, answers }: { fact
             options={cogParams.map((p) => p.name)}
             placeholder="choose a parameter"
           />
-          {cogParam ? (
-            <div className="text-sm text-neutral-600">
-              {cogParam.note ? <p className="mb-1 text-xs text-neutral-400">{cogParam.note}</p> : null}
-              {cogParam.min < cogParam.max ? (
-                <NumericLevelsInput value={entry.levels ?? ""} min={cogParam.min} max={cogParam.max} onChange={(lv) => onPatch({ levels: lv })} />
-              ) : (
-                <input value={entry.levels ?? ""} onChange={(e) => onPatch({ levels: e.target.value })} placeholder="e.g. top-2 features vs all features" className="w-full border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none placeholder:text-neutral-400 focus:border-neutral-500" />
-              )}
-            </div>
-          ) : null}
+          {cogParam ? (() => {
+            const range = cogParamRange(cogParam);
+            const isEnum = cogParamType(cogParam) === "enum";
+            return (
+              <div className="text-sm text-neutral-600">
+                {cogParam.note ? <p className="mb-1 text-xs text-neutral-400">{cogParam.note}</p> : null}
+                {isEnum ? (
+                  <div className="flex flex-wrap gap-2">
+                    {(cogParam.options || []).map((opt) => {
+                      const on = levels.includes(opt);
+                      return (
+                        <button key={opt} type="button" onClick={() => toggleLevel(opt)} className={cn("rounded-full border px-3 py-1 text-xs font-medium transition-colors", on ? "border-transparent text-white" : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-100")} style={on ? { backgroundColor: ACCENT } : undefined}>
+                          {opt}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : range ? (
+                  <NumericLevelsInput value={entry.levels ?? ""} min={range.min} max={range.max} soft={cogParam.softBounds} onChange={(lv) => onPatch({ levels: lv })} />
+                ) : (
+                  <input value={entry.levels ?? ""} onChange={(e) => onPatch({ levels: e.target.value })} placeholder="e.g. top-2 features vs all features" className="w-full border-0 border-b border-neutral-200 bg-transparent px-0 py-1 text-[15px] outline-none placeholder:text-neutral-400 focus:border-neutral-500" />
+                )}
+              </div>
+            );
+          })() : null}
         </div>
       ) : null}
     </div>
@@ -448,7 +483,7 @@ export const IV_TYPES_DOCS = "#";
 
 export function IvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
   const a = answers;
-  const agent = a.sd_iv_agent || (a.user_model === "CoXAM" ? "CoXAM" : a.user_model === "Sim2Real" ? "Sim2Real" : "CoAX");
+  const agent = ivAgentFor(a);
   const ivs = parseIvs(a);
 
   const [customs, setCustoms] = useState<IvFactor[]>([]);
@@ -475,6 +510,22 @@ export function IvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer:
   const hasOtherElsewhere = (i: number) => ivs.some((e, j) => j !== i && e.factor && e.factor !== "xai_property");
   const hasXaiProp = ivs.some((e) => e.factor === "xai_property");
   const mixedXaiProp = hasXaiProp && ivs.some((e) => e.factor && e.factor !== "xai_property");
+
+  // No duplicate factors: each factor may be used by only one IV. (Cognitive
+  // Parameters are exempt here — multiple cognitive IVs with different parameters
+  // are legitimate; duplicates of the same parameter are dropped on save.)
+  const usedElsewhere = (i: number, factorId: string) =>
+    factorId !== "cognitive" && ivs.some((e, j) => j !== i && e.factor === factorId);
+  const dupFactorLabels = (() => {
+    const seen = new Set<string>();
+    const dups = new Set<string>();
+    for (const e of ivs) {
+      if (!e.factor || e.factor === "cognitive") continue;
+      if (seen.has(e.factor)) dups.add(e.label || e.factor);
+      seen.add(e.factor);
+    }
+    return Array.from(dups);
+  })();
 
   // One-time migration from the old single-IV fields.
   useEffect(() => {
@@ -556,10 +607,13 @@ export function IvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer:
                   {grouped.map((g) => (
                     <optgroup key={g.group} label={g.group}>
                       {g.items.map((f) => {
-                        const blocked = f.id === "xai_property" ? hasOtherElsewhere(i) : hasXaiPropElsewhere(i);
+                        const xaiPropBlocked = f.id === "xai_property" ? hasOtherElsewhere(i) : hasXaiPropElsewhere(i);
+                        const dupBlocked = !xaiPropBlocked && usedElsewhere(i, f.id);
+                        const blocked = xaiPropBlocked || dupBlocked;
+                        const suffix = xaiPropBlocked ? " (not combinable)" : dupBlocked ? " (already used)" : "";
                         return (
-                          <option key={f.id} value={f.id} disabled={blocked} title={blocked ? "XAI Property cannot be combined with other IVs" : f.def} className="text-neutral-900">
-                            {f.label}{blocked ? " (not combinable)" : ""}
+                          <option key={f.id} value={f.id} disabled={blocked} title={xaiPropBlocked ? "XAI Property cannot be combined with other IVs" : dupBlocked ? "This factor is already used by another IV" : f.def} className="text-neutral-900">
+                            {f.label}{suffix}
                           </option>
                         );
                       })}
@@ -592,6 +646,9 @@ export function IvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer:
 
         {mixedXaiProp ? (
           <p className="text-sm font-medium text-red-600">XAI Property cannot be combined with other independent variables — remove one of them.</p>
+        ) : null}
+        {dupFactorLabels.length ? (
+          <p className="text-sm font-medium text-red-600">Duplicate independent variables: {dupFactorLabels.join(", ")} — each factor can only be used once; remove the duplicate.</p>
         ) : null}
 
         <div className="flex flex-wrap items-center gap-2">
