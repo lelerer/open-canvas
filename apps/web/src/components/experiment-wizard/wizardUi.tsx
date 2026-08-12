@@ -77,10 +77,13 @@ export function TextInput({ value, onChange, placeholder, type = "text" }: { val
   );
 }
 
-export function DocLabel({ children, tip }: { children: ReactNode; tip?: ReactNode }) {
+export function DocLabel({ children, tip, required }: { children: ReactNode; tip?: ReactNode; required?: boolean }) {
   return (
     <div className="flex items-center gap-1.5">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">{children}</p>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">
+        {required ? <span className="mr-0.5 text-amber-500" title="Required">*</span> : null}
+        {children}
+      </p>
       {tip ? <InfoTip>{tip}</InfoTip> : null}
     </div>
   );

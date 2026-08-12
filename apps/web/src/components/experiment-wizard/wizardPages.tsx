@@ -677,11 +677,11 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
           A <span className="font-medium text-neutral-800">user model</span> is a stand-in for a human participant — a program that simulates how a person would read the explanations and make decisions, so you can pilot the study without recruiting people yet. Pick the <span className="font-medium text-neutral-800">one</span> you're studying. <span className="font-medium text-neutral-800">Comparison baselines</span> are simpler, standard models (e.g. k-nearest-neighbours) you run alongside to compare against.
         </InfoTip>
       </h1>
-      <p className="mt-1 text-sm text-neutral-400">Pick the model you're studying, plus any baselines to compare against.</p>
+      <p className="mt-1 text-sm text-neutral-400">Pick the model you're studying, plus any baselines to compare against. Sections marked <span className="font-medium text-amber-500">*</span> are required.</p>
 
       <div className="mt-6 space-y-6">
         <div>
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">User model · select one</p>
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400"><span className="mr-0.5 text-amber-500" title="Required">*</span>User model · select one</p>
           <div className="space-y-2">
             {userModels.map((m) => (
               <Card key={m.id} m={m} multi={false} on={a.user_model === m.id} onClick={() => setAnswer("user_model", m.id)} />
@@ -847,7 +847,7 @@ function answerColor(v: string): string {
 export function TrialPreview({ view, caseNumber, url }: { view: TrialView; caseNumber: number; url?: string }) {
   // Every design here (forward- or counterfactual-simulation, on every agent)
   // has the participant predict the AI, never the dataset's true label — so
-  // "Actual (AI)" is the only reference that means anything. A dataset ground
+  // "AI prediction" is the only reference that means anything. A dataset ground
   // truth is deliberately not shown as its own row: some result rows carry a
   // ground_truth/target/etc. column anyway (left over from the source
   // dataset), and showing it next to "AI prediction" reads as if it were the
@@ -855,7 +855,7 @@ export function TrialPreview({ view, caseNumber, url }: { view: TrialView; caseN
   const rows: { key: string; label: string; text: string; note?: string; badge: string; icon: ReactNode }[] = [
     {
       key: "sim",
-      label: "Simulation",
+      label: "Virtual Participant",
       text: view.simulation?.prediction ?? "",
       note: view.probCorrect !== null ? `P(correct) ${view.probCorrect.toFixed(0)}%`
         : view.simulation?.confidence != null ? `Confidence ${view.simulation.confidence.toFixed(0)}%`
@@ -873,7 +873,7 @@ export function TrialPreview({ view, caseNumber, url }: { view: TrialView; caseN
     },
     {
       key: "ai",
-      label: "Actual (AI)",
+      label: "AI prediction",
       text: view.ai?.prediction ?? "",
       note: view.ai?.confidence != null ? `Confidence ${view.ai.confidence.toFixed(0)}%` : undefined,
       badge: "#7c2d12",
@@ -937,7 +937,7 @@ export function TrialPreview({ view, caseNumber, url }: { view: TrialView; caseN
       {view.matchesAi !== null ? (
         // Amber rather than red for a mismatch: red already means "Type 1" above.
         <p className="border-t border-neutral-100 px-4 py-2 text-xs" style={{ color: view.matchesAi ? ACCENT : "#b45309" }}>
-          {view.matchesAi ? "Simulation matched the AI" : "Simulation differed from the AI"}
+          {view.matchesAi ? "Virtual participant matched the AI prediction" : "Virtual participant differed from the AI prediction"}
         </p>
       ) : null}
     </div>

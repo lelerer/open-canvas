@@ -31,16 +31,16 @@ export function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setA
           This is the heart of the experiment: what you <span className="font-medium text-neutral-800">measure</span>, what you <span className="font-medium text-neutral-800">change on purpose</span>, and what you <span className="font-medium text-neutral-800">keep the same</span> so any difference in results can be attributed to your manipulation. Each section below has its own ⓘ for what it means.
         </InfoTip>
       </h1>
-      <p className="mt-1 text-sm text-neutral-400" style={{ fontFamily: "ui-sans-serif, system-ui" }}>Define what you measure, change, and hold constant. Type directly, or let the assistant fill it in.</p>
+      <p className="mt-1 text-sm text-neutral-400" style={{ fontFamily: "ui-sans-serif, system-ui" }}>Define what you measure, change, and hold constant. Type directly, or let the assistant fill it in. Sections marked <span className="font-medium text-amber-500">*</span> are required.</p>
 
       <div className="mt-8 space-y-7">
         <div>
-          <DocLabel tip={<span>The outcome you <span className="font-medium text-neutral-800">measure</span> — e.g. accuracy, decision time, trust. This is what your research question is really about. Pick from the list or define a custom one with a formula.</span>}>Dependent Variables (DV)</DocLabel>
+          <DocLabel required tip={<span>The outcome you <span className="font-medium text-neutral-800">measure</span> — e.g. accuracy, decision time, trust. This is what your research question is really about. Pick from the list or define a custom one with a formula.</span>}>Dependent Variables (DV)</DocLabel>
           <DvBuilder answers={answers} setAnswer={setAnswer} />
         </div>
 
         <div>
-          <DocLabel tip={<span>What you <span className="font-medium text-neutral-800">deliberately vary</span> across conditions (e.g. explanation vs none). Each IV and its levels create the conditions participants are split across.</span>}>Independent Variable(s)</DocLabel>
+          <DocLabel required tip={<span>What you <span className="font-medium text-neutral-800">deliberately vary</span> across conditions (e.g. explanation vs none). Each IV and its levels create the conditions participants are split across.</span>}>Independent Variable(s)</DocLabel>
           <IvBuilder answers={answers} setAnswer={setAnswer} />
         </div>
 
@@ -76,7 +76,7 @@ export function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setA
         })()}
 
         <div className="border-t border-neutral-100 pt-6">
-          <DocLabel>Participants</DocLabel>
+          <DocLabel required>Participants</DocLabel>
           {(() => {
             const numCls = "w-16 border-0 border-b border-neutral-200 bg-transparent px-0 py-0.5 text-center text-[15px] text-neutral-900 outline-none placeholder:text-neutral-400 focus:border-neutral-500";
             const per = parseInt(a.sd_participants || "", 10) || 0;

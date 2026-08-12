@@ -180,9 +180,9 @@ export const IV_CATALOG: IvFactor[] = [
     cognitiveByAgent: {
       CoAX: [
         { name: "Retrieval Threshold", min: -4.0, max: -0.97, note: "Memory capacity; higher = harder retrieval / more forgetting." },
-        { name: "Exemplar Distance Sensitivity", min: 1, max: 20, note: "How strongly distance affects similarity." },
-        { name: "Attended Features", min: 1, max: 5, note: "Attention span — features attended when comparing exemplars." },
-        { name: "Feature-Class Sensitivity", min: 1, max: 8, note: "How strongly attribution maps to classes." },
+        { name: "Exemplar Distance Sensitivity", min: 1, max: 20, note: "How sensitive the virtual participant is to similarity between instances — higher = it relies only on the most similar past examples when judging a new one." },
+        { name: "Attended Features", min: 1, max: 5, note: "How many features the virtual participant is able to pay attention to when comparing instances." },
+        { name: "Feature-Class Sensitivity", min: 1, max: 8, note: "How strongly the shown feature attributions pull the virtual participant's prediction toward a class — higher = it follows the explanation more literally." },
       ],
       CoXAM: [
         // The valid range depends on the user task, so the field spans both; the
