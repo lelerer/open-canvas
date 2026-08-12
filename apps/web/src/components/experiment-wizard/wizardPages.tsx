@@ -1374,7 +1374,7 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
   // run; post-hoc needs a DV, so it is fetched on demand once that view is open.
   // The server analyses its own results columns, so the options come from the
   // data; the design's DV labels only decide which one is selected first.
-  const dvOptions = dvColumnsOf(rows);
+  const dvOptions = dvColumnsOf(rows).filter((c) => /^(forward|counterfactual)_accuracy$/.test(c));
   const designDvs = parseDvs(a.sd_dv).map(dvDisplayName).filter(Boolean);
   const preferredDv = designDvs.map((d) => matchDvColumn(d, dvOptions)).find(Boolean) ?? "";
   const activeDv = dvOptions.includes(dv) ? dv : preferredDv || dvOptions[0] || "";
@@ -1680,6 +1680,16 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
                     <div className="space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Interaction plot</p>
+                        {dvOptions.length > 1 ? (
+                          <select
+                            value={activeDv}
+                            onChange={(ev) => setDv(ev.target.value)}
+                            className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs outline-none focus:border-neutral-400"
+                            aria-label="Dependent variable"
+                          >
+                            {dvOptions.map((d) => (<option key={d} value={d}>{d}</option>))}
+                          </select>
+                        ) : null}
                         <select
                           value={activeXIv}
                           onChange={(ev) => setXIv(ev.target.value)}
