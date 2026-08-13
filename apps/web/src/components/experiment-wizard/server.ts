@@ -309,6 +309,15 @@ export function dvColumnsOf(rows: ResultRow[]): string[] {
   );
 }
 
+// Every column present across a run's raw result rows, in first-seen order —
+// unfiltered (unlike dvColumnsOf/ivColumnsOf), for rendering the rows as-is
+// rather than picking out DVs/IVs.
+export function allColumnsOf(rows: ResultRow[]): string[] {
+  const seen: string[] = [];
+  for (const r of rows.slice(0, 50)) for (const k of Object.keys(r)) if (!seen.includes(k)) seen.push(k);
+  return seen;
+}
+
 // Fallback only — the server now returns the authoritative list itself as
 // `plot_variables` on GET /results (see ResultsPage/getAllResults), which
 // ivColumnsOf() is a stand-in for when that's unavailable (an outcome cached
@@ -525,6 +534,16 @@ export function formatCell(v: unknown): string {
   }
   if (typeof v === "object") return JSON.stringify(v);
   return String(v);
+}
+
+const csvCell = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
+
+export function tableToCsv(table: SimpleTable): string {
+  const lines = [table.columns.map(csvCell).join(",")];
+  for (const row of table.rows) {
+    lines.push(table.columns.map((c) => csvCell(formatCell(row[c]))).join(","));
+  }
+  return lines.join("\n");
 }
 
 /* --------------------------------- plots --------------------------------- */
