@@ -110,6 +110,7 @@ export interface IvFactor {
   def?: string; // one-line definition (shown as a tooltip / under the select)
   agents?: string[]; // available only for these models (default: all)
   unsupportedAgents?: string[]; // models that cannot manipulate this IV at all (shown, but flagged)
+  hidden?: boolean; // kept in the catalog (legacy saves still parse) but not offered in the IV dropdown
   levels?: string[]; // categorical, same across models
   levelsByAgent?: Record<string, string[]>;
   range?: { min: number; max: number };
@@ -127,7 +128,9 @@ export const IV_CATALOG: IvFactor[] = [
     kind: "categorical",
     group: "Explanation (XAI)",
     def: "The category/family of explanation shown to the user.",
-    agents: ["CoAX", "CoXAM"],
+    // Always offered as an IV; Sim2Real designs can't manipulate it, which is
+    // flagged as a warning in the editor rather than hidden from the dropdown.
+    unsupportedAgents: ["Sim2Real"],
     // CoAX supports only the local family; CoXAM supports all six.
     levelsByAgent: {
       CoAX: ["None", "Attribution", "Importance"],
@@ -140,6 +143,7 @@ export const IV_CATALOG: IvFactor[] = [
     kind: "categorical",
     group: "Explanation (XAI)",
     def: "The specific algorithm used to generate the explanation.",
+    hidden: true, // removed from the IV dropdown; kept so older saved designs still parse
     agents: ["CoAX", "CoXAM"],
     // Always the same six methods; the IV itself is only supported by CoAX.
     levels: ["LIME", "SHAP", "Integrated Gradients", "Input Gradients (paper)", "Layer-wise Relevance Propagation", "Captum DeepLift"],
@@ -246,7 +250,7 @@ export const IV_CATALOG: IvFactor[] = [
 ];
 
 export function ivFactorsForAgent(agent: string): IvFactor[] {
-  return IV_CATALOG.filter((f) => !f.agents || f.agents.includes(agent));
+  return IV_CATALOG.filter((f) => !f.hidden && (!f.agents || f.agents.includes(agent)));
 }
 
 export function ivLevelsFor(f: IvFactor, agent: string): string[] {
@@ -381,13 +385,17 @@ export function hasXaiPropertyIv(a: Answers): boolean {
 // CoAX and CoXAM support different levels for some IVs (XAI Type, XAI Method,
 // User Task). Returns the selected levels of an IV entry that the given
 // model/framework does NOT support, so the UI can flag the mismatch.
-const AGENT_CHECKED_FACTORS = new Set(["xai_type", "xai_method", "user_task"]);
+const AGENT_CHECKED_FACTORS = new Set(["xai_type", "xai_method", "user_task", "dataset"]);
+// "Mushroom (CoXAM only)" and "Mushroom" are the same level — the parenthetical
+// suffixes on catalog entries are display-only.
+const normalizeLevel = (s: string) => s.replace(/\s*\([^)]*\)\s*$/, "").trim().toLowerCase();
 export function unsupportedIvLevels(e: IvEntry, agent: string): string[] {
   if (!AGENT_CHECKED_FACTORS.has(e.factor)) return [];
   const f = IV_CATALOG.find((x) => x.id === e.factor);
   if (!f || !f.levelsByAgent) return [];
-  const supported = ivLevelsFor(f, agent).map((s) => s.toLowerCase());
-  return ivLevelList(e).filter((l) => !supported.includes(l.toLowerCase()));
+  const supported = ivLevelsFor(f, agent).map(normalizeLevel);
+  if (!supported.length) return [];
+  return ivLevelList(e).filter((l) => !supported.includes(normalizeLevel(l)));
 }
 
 // Whether the given model cannot manipulate this IV at all (e.g. XAI Method is
@@ -395,6 +403,25 @@ export function unsupportedIvLevels(e: IvEntry, agent: string): string[] {
 export function ivFactorUnsupportedByAgent(e: IvEntry, agent: string): boolean {
   const f = IV_CATALOG.find((x) => x.id === e.factor);
   return !!f?.unsupportedAgents?.includes(agent);
+}
+
+// ---- Toolkit capability constraints (flagged as warnings in the UI) ----
+// DV measures a model/framework cannot produce: CoAX has no counterfactual
+// simulation; Sim2Real (XAI Property) has no forward-simulation accuracy.
+const DV_UNSUPPORTED_BY_AGENT: Record<string, string[]> = {
+  CoAX: ["counterfactual_sim"],
+  Sim2Real: ["forward_sim"],
+};
+export function dvUnsupportedByAgent(measure: string, agent: string): boolean {
+  return (DV_UNSUPPORTED_BY_AGENT[agent] ?? []).includes(measure);
+}
+
+// Whether a dataset pick is outside what the model/framework supports, per the
+// Dataset IV catalog (e.g. Mushroom is CoXAM-only, Adult Income CoAX-only).
+export function datasetUnsupportedByAgent(dataset: string, agent: string): boolean {
+  const f = IV_CATALOG.find((x) => x.id === "dataset");
+  const supported = (f?.levelsByAgent?.[agent] ?? []).map(normalizeLevel);
+  return supported.length > 0 && !supported.includes(normalizeLevel(dataset));
 }
 
 // Participants are split only across the between-subjects cells.
@@ -1043,7 +1070,10 @@ export function studyNaturalSize(mode: string, params: Record<string, string>): 
 
 export function elementsOf(p: Record<string, string>): string[] {
   const raw = p.elements != null ? p.elements : p.widgets != null ? p.widgets : "instance,meters,xai,prediction";
-  const els = raw.split(",").map((s) => s.trim()).filter(Boolean).map((k) => (k === "simulation" ? "sliders" : k));
+  let els = raw.split(",").map((s) => s.trim()).filter(Boolean).map((k) => (k === "simulation" ? "sliders" : k));
+  // Feature importance has no slider/ground-truth widgets — drop them even if a
+  // saved config selected them under a different explanation form.
+  if (formOf(p) === "importance") els = els.filter((k) => k !== "sliders" && k !== "ground-truth");
   // "Data instance" is always shown — it cannot be deselected (also repairs
   // older saved configs and chat-set element lists that omitted it).
   if (!els.includes("instance")) els.unshift("instance");

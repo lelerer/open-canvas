@@ -10,6 +10,7 @@ import {
   participantGroups, withinCoverage, unsupportedIvLevels, ivFactorUnsupportedByAgent,
   DATASET_OPTIONS, DV_CATALOG, DV_GROUP_ORDER, DvEntry, parseDvs, Variable, parseVars,
   ivAgentFor, cogParamType, cogParamRange,
+  hasXaiPropertyIv, dvUnsupportedByAgent, datasetUnsupportedByAgent,
   trialSplit, DEFAULT_TRAINING_TRIALS, DEFAULT_TESTING_TRIALS,
 } from "./questions";
 
@@ -142,6 +143,12 @@ export function StudyDesignBody({ answers, setAnswer }: { answers: Answers; setA
 
 export function DvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
   const items = parseDvs(answers.sd_dv);
+  // Flag DV measures the model/framework cannot produce: CoAX has no
+  // counterfactual simulation; XAI-Property designs (Sim2Real) have no
+  // forward-simulation accuracy.
+  const xaiProp = hasXaiPropertyIv(answers);
+  const dvAgent = xaiProp ? "Sim2Real" : ivAgentFor(answers);
+  const modelKnown = xaiProp || !!(((answers.sd_iv_agent || "").trim()) || ((answers.user_model || "").trim()));
 
   function save(next: DvEntry[]) { setAnswer("sd_dv", JSON.stringify(next)); }
   function add() { save([...items, { measure: "", name: "", formula: "" }]); }
@@ -186,6 +193,14 @@ export function DvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer:
               </div>
 
               {def ? <p className="mt-1 text-xs text-neutral-400">{def}</p> : null}
+
+              {e.measure && e.measure !== "custom" && dvUnsupportedByAgent(e.measure, dvAgent) ? (
+                <p className="mt-1 text-xs font-medium text-amber-700">
+                  {dvAgent === "Sim2Real"
+                    ? "Sim2Real (XAI Property designs) does not support Forward-Simulation Accuracy — choose a different measure."
+                    : `${DV_CATALOG.find((d) => d.id === e.measure)?.label ?? e.measure} is not supported by ${dvAgent}${modelKnown ? "" : " (the default model)"} — choose a different measure, or switch the model on the User Model page.`}
+                </p>
+              ) : null}
 
               {e.measure === "custom" ? (
                 <div className="mt-2 space-y-2">
@@ -325,10 +340,14 @@ export function VariableList({ valueKey, answers, setAnswer, namePlaceholder }: 
 
 export function DatasetPicker({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
   const a = answers;
+  const xaiProp = hasXaiPropertyIv(a);
+  const agent = xaiProp ? "Sim2Real" : ivAgentFor(a);
+  const modelKnown = xaiProp || !!(((a.sd_iv_agent || "").trim()) || ((a.user_model || "").trim()));
+  const ds = DATASET_OPTIONS.includes((a.ds_dataset || "").trim()) ? (a.ds_dataset || "").trim() : "";
   return (
     <div style={{ fontFamily: "ui-sans-serif, system-ui" }}>
       <select
-        value={DATASET_OPTIONS.includes((a.ds_dataset || "").trim()) ? (a.ds_dataset || "").trim() : ""}
+        value={ds}
         onChange={(e) => setAnswer("ds_dataset", e.target.value)}
         className={cn("min-w-[12rem] rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-400", a.ds_dataset ? "text-neutral-900" : "text-neutral-400")}
       >
@@ -338,6 +357,11 @@ export function DatasetPicker({ answers, setAnswer }: { answers: Answers; setAns
         </optgroup>
       </select>
       <p className="mt-1.5 text-xs text-neutral-400">Pick one of the built-in datasets.</p>
+      {ds && datasetUnsupportedByAgent(ds, agent) ? (
+        <p className="mt-1.5 text-xs font-medium text-amber-700">
+          {agent}{modelKnown ? "" : " (the default model)"} does not support the {ds} dataset — pick a different dataset, or switch the model on the User Model page.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -426,10 +450,13 @@ export function IvLevelEditor({ factor, entry, agent, onPatch, answers }: { fact
     ...levels, // keep any already-selected value visible even if not in the base list
   ]));
 
-  // Flag mismatches with the chosen model/framework (only once a model is known).
+  // Flag mismatches with the chosen model/framework. Level checks also run
+  // before a model is chosen (against the default, CoAX), so unsupported picks —
+  // e.g. the Decision Tree / Logistic Regression / Hybrid XAI types or the
+  // Mushroom dataset, neither supported by CoAX — are flagged immediately.
   const modelKnown = !!(((answers?.sd_iv_agent || "").trim()) || ((answers?.user_model || "").trim()));
   const factorUnsupported = modelKnown && ivFactorUnsupportedByAgent(entry, agent);
-  const unsupported = modelKnown && !factorUnsupported ? unsupportedIvLevels(entry, agent) : [];
+  const unsupported = !factorUnsupported ? unsupportedIvLevels(entry, agent) : [];
 
   return (
     <div className="mt-2" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
@@ -462,7 +489,7 @@ export function IvLevelEditor({ factor, entry, agent, onPatch, answers }: { fact
         </p>
       ) : unsupported.length ? (
         <p className="mt-2 text-xs font-medium text-amber-700">
-          {agent} does not support: {unsupported.join(", ")}. Choose levels supported by {agent}, or switch the model on the User Model page.
+          {agent}{modelKnown ? "" : " (the default model)"} does not support: {unsupported.join(", ")}. Choose levels supported by {agent}, or switch the model on the User Model page.
         </p>
       ) : null}
 
