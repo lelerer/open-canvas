@@ -31,7 +31,7 @@ Conversation style:
 
 Domain knowledge for the independent variable (levels depend on the model):
 - XAI type — CoAX supports ONLY None / Attribution / Importance; CoXAM supports all six: None / Attribution / Importance / Decision Tree / Logistic Regression / Hybrid. Flag a mismatch if the user picks CoAX with Decision Tree / Logistic Regression / Hybrid.
-- XAI method — always these six: LIME, SHAP, Integrated Gradients, Input Gradients (paper), Layer-wise Relevance Propagation, Captum DeepLift. This IV is supported by CoAX ONLY — CoXAM cannot manipulate XAI Method at all; flag a mismatch if the user combines them.
+- XAI method is NOT available as an IV in this toolkit — if the user wants to manipulate the explanation algorithm (e.g. LIME vs SHAP), explain it isn't supported and suggest XAI Type instead.
 - Number of attributes (1–10); Number of training instances (1–14; CoAX default 10, test 18)
 - Dataset — Adult Income (CoAX only), Mushroom (CoXAM only), Wine Quality, Forest Cover
 - XAI Property — faithful / sparse / robust / sparse_robust (the Sim2Real synthetic-AI study; EXCLUSIVE: cannot be combined with any other IV, and the apparatus must use the "adult_sim2real" dataset); AI model (MLP / XGBoost, usually controlled by dataset); Tested-with-XAI (with vs without, within-subjects)
@@ -58,7 +58,7 @@ Put an "ops" array inside the APPLY block. Each op edits ONE item of one list:
 - IMPORTANT: an op whose "match" finds nothing is silently dropped — the user's data does NOT change. For apparatus_list, match against the EXACT group value (e.g. "XAI Property = sparse_robust") or use "index"; when updating every entry in a list, prefer one op per entry by index (1, 2, 3, …).
 Examples:
   Add a DV:        {"ops":[{"target":"sd_dv","op":"add","value":{"measure":"Trust"}}]}
-  Edit IV levels:  {"ops":[{"target":"sd_ivs","op":"update","match":"XAI Method","value":{"levels":["LIME","SHAP","Integrated Gradients"]}}]}
+  Edit IV levels:  {"ops":[{"target":"sd_ivs","op":"update","match":"XAI Type","value":{"levels":["None","Attribution","Importance"]}}]}
   Remove a step:   {"ops":[{"target":"proc_steps","op":"remove","match":"break"}]}
 You can mix scalar fields and ops in the same block, e.g. {"sd_participants":"24","ops":[...]}.
 
@@ -69,9 +69,9 @@ Field ids you can fill or modify (anywhere in the form):
     { "factor": "<IV type>", "levels": ["..."], "alloc": "Within-subjects" | "Between-subjects", "balancing": "<only if Within-subjects>" }
   Use ops (add/update/remove) to edit; send a full array only to create the list initially.
   Rules:
-    • factor must be one of the known IV types: "XAI Type", "XAI Method", "XAI Property", "Tested with XAI", "Number of Attributes", "Number of Training Instances", "Dataset", "AI Model", "Cognitive Parameters", "User Task". (An unrecognised factor becomes a custom categorical IV using the levels you give.)
+    • factor must be one of the known IV types: "XAI Type", "XAI Property", "Tested with XAI", "Number of Attributes", "Number of Training Instances", "Dataset", "AI Model", "Cognitive Parameters", "User Task". (An unrecognised factor becomes a custom categorical IV using the levels you give.)
     • "XAI Property" is EXCLUSIVE: levels are "faithful", "sparse", "robust", "sparse_robust"; it may NOT be combined with any other IV (refuse and explain if the user asks). When XAI Property is the IV, the apparatus must use the Sim2Real interface: set the apparatus params to appId "adult_sim2real" with expMethod set to the property per condition.
-    • Categorical factors (XAI Type, XAI Method, Dataset, AI Model, User Task): give "levels" from that factor's allowed values for the chosen model.
+    • Categorical factors (XAI Type, Dataset, AI Model, User Task): give "levels" from that factor's allowed values for the chosen model.
     • Range factors (Number of Attributes, Number of Training Instances): give "levels" as an array of the specific numeric values you want to test, e.g. "levels": [2, 8, 10] — each value becomes one level/condition (so [2,8,10] is a 3-level factor). Every value must fall within that factor's allowed range.
     • Binary factors (Tested with XAI): you may omit "levels" (the two levels are implied).
     • Cognitive Parameters: give "cogParam" (e.g. "Retrieval Threshold") plus "levels" as an array of the specific values to test (e.g. [-2, 0, 2]).

@@ -263,13 +263,14 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                     const outOfRange = (id: string) => { const n = Number(id); return !Number.isInteger(n) || n < range.min || n > range.max; };
                     const badIds = [...trainIds, ...ids].filter(outOfRange);
                     const dsLabel = STUDY_DATASETS.find((d) => d.appId === (p.appId || "wine_quality"))?.label ?? p.appId;
-                    const available = (el: { key: string; localOnly?: boolean }) => !(ns === "global" && el.localOnly);
+                    // Feature importance has no slider/ground-truth widgets — hide those cards entirely.
+                    const visible = (el: { key: string }) => !(form === "importance" && (el.key === "sliders" || el.key === "ground-truth"));
                     const toggleElement = (k: string) => {
                       if (k === "instance") return; // always shown, cannot be deselected
                       const next = els.includes(k) ? els.filter((x) => x !== k) : [...els, k];
                       setParam(e, "elements", next.join(","));
                     };
-                    const selectAll = () => setParam(e, "elements", INTERFACE_ELEMENTS.filter(available).map((x) => x.key).join(","));
+                    const selectAll = () => setParam(e, "elements", INTERFACE_ELEMENTS.filter(visible).map((x) => x.key).join(","));
                     const flagCheck = (label: string, on: boolean, toggle: () => void) => (
                       <label key={label} className="flex cursor-pointer items-center gap-2 text-sm text-neutral-700">
                         <input type="checkbox" checked={on} onChange={toggle} className="h-4 w-4" style={{ accentColor: ACCENT }} />
@@ -294,26 +295,24 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                             <button type="button" onClick={selectAll} className="shrink-0 text-xs font-semibold" style={{ color: ACCENT }}>Select all</button>
                           </div>
                           <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                            {INTERFACE_ELEMENTS.map((el) => {
-                              const enabled = available(el);
-                              const locked = enabled && !!el.required;
-                              const on = enabled && (locked || els.includes(el.key));
+                            {INTERFACE_ELEMENTS.filter(visible).map((el) => {
+                              const locked = !!el.required;
+                              const on = locked || els.includes(el.key);
                               const accent = on && !locked; // locked cards get a muted grey look instead of the accent
                               return (
                                 <button
                                   key={el.key}
                                   type="button"
-                                  disabled={!enabled || locked}
+                                  disabled={locked}
                                   onClick={() => toggleElement(el.key)}
                                   className={cn(
                                     "flex items-center justify-between gap-3 rounded-xl border p-3 text-left transition-colors",
-                                    !enabled ? "cursor-not-allowed border-neutral-200 opacity-40"
-                                      : locked ? "cursor-default border-neutral-200 bg-neutral-100/80"
-                                        : accent ? ""
-                                          : "border-neutral-200 hover:bg-neutral-50"
+                                    locked ? "cursor-default border-neutral-200 bg-neutral-100/80"
+                                      : accent ? ""
+                                        : "border-neutral-200 hover:bg-neutral-50"
                                   )}
                                   style={accent ? { borderColor: ACCENT, backgroundColor: `${ACCENT}14` } : undefined}
-                                  title={!enabled ? "Not supported by the surrogate (LR / decision-tree) interface" : locked ? "Always shown to participants — cannot be turned off" : undefined}
+                                  title={locked ? "Always shown to participants — cannot be turned off" : undefined}
                                 >
                                   <span className="min-w-0">
                                     <span className={cn("block text-sm font-semibold", locked ? "text-neutral-500" : "text-neutral-900")}>{el.label}</span>
@@ -329,7 +328,6 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                               );
                             })}
                           </div>
-                          {ns === "global" ? <p className="mt-1 text-xs text-neutral-400">Greyed-out elements aren't supported by the surrogate (LR / decision-tree) interface.</p> : null}
                         </div>
                         ) : null}
 
@@ -424,9 +422,6 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                             {sim2real ? flagCheck("Show change to consider (delta)", p.showDelta !== "0", () => setParam(e, "showDelta", p.showDelta === "0" ? "1" : "0")) : null}
                             {sim2real ? flagCheck("Show AI prediction", p.showPrediction !== "0", () => setParam(e, "showPrediction", p.showPrediction === "0" ? "1" : "0")) : null}
                             {sim2real ? flagCheck("Show question", p.showQuestion !== "0", () => setParam(e, "showQuestion", p.showQuestion === "0" ? "1" : "0")) : null}
-                            {ns === "global" && form === "DT" ? flagCheck("Participant edits the tree", p.DTEditor === "1", () => setParam(e, "DTEditor", p.DTEditor === "1" ? "0" : "1")) : null}
-                            {ns === "global" ? flagCheck("Show the explanation's prediction", p.showExplanationPrediction !== "0", () => setParam(e, "showExplanationPrediction", p.showExplanationPrediction === "0" ? "1" : "0")) : null}
-                            {ns === "global" && els.includes("sliders") ? flagCheck("Ask participants to confirm slider changes (recourse)", p.recourseConfirm === "1", () => setParam(e, "recourseConfirm", p.recourseConfirm === "1" ? "0" : "1")) : null}
                           </div>
                         </div>
 
