@@ -194,11 +194,11 @@ export function DvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer:
 
               {def ? <p className="mt-1 text-xs text-neutral-400">{def}</p> : null}
 
-              {e.measure && e.measure !== "custom" && dvUnsupportedByAgent(e.measure, dvAgent) ? (
+              {e.measure && e.measure !== "custom" && modelKnown && dvUnsupportedByAgent(e.measure, dvAgent) ? (
                 <p className="mt-1 text-xs font-medium text-amber-700">
                   {dvAgent === "Sim2Real"
                     ? "Sim2Real (XAI Property designs) does not support Forward-Simulation Accuracy — choose a different measure."
-                    : `${DV_CATALOG.find((d) => d.id === e.measure)?.label ?? e.measure} is not supported by ${dvAgent}${modelKnown ? "" : " (the default model)"} — choose a different measure, or switch the model on the User Model page.`}
+                    : `${DV_CATALOG.find((d) => d.id === e.measure)?.label ?? e.measure} is not supported by ${dvAgent} — choose a different measure, or switch the model on the User Model page.`}
                 </p>
               ) : null}
 
