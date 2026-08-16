@@ -168,9 +168,9 @@ export const IV_CATALOG: IvFactor[] = [
     group: "Data & Model",
     def: "Which dataset the task instances are drawn from.",
     levelsByAgent: {
-      CoAX: ["Adult Income (CoAX only)", "Wine Quality", "Forest Cover"],
-      CoXAM: ["Mushroom (CoXAM only)", "Wine Quality", "Forest Cover"],
-      Sim2Real: ["Wine Quality", "Forest Cover"],
+      CoAX: ["Adult Income", "Wine Quality", "Forest Cover"],
+      CoXAM: ["Adult Income", "Mushroom (CoXAM only)", "Wine Quality", "Forest Cover"],
+      Sim2Real: ["Adult Income"],
     },
   },
   { id: "ai_model", label: "AI Model", kind: "categorical", group: "Data & Model", def: "The underlying predictive model being explained.", levels: ["MLP", "XGBoost"], note: "Usually controlled by dataset." },
@@ -382,6 +382,15 @@ export function hasXaiPropertyIv(a: Answers): boolean {
   return parseIvs(a).some((e) => e.factor === "xai_property");
 }
 
+// XAI Property designs only run on Sim2Real — CoAX and CoXAM can't simulate
+// across different XAI properties. Returns the conflict message for the
+// current user model, or "" when there's no conflict.
+export function xaiPropertyModelConflict(a: Answers): string {
+  if (!hasXaiPropertyIv(a)) return "";
+  const agent = cognitiveAgentFor(a.user_model);
+  return agent === "CoAX" || agent === "CoXAM" ? `${agent} cannot handle simulations for different XAI Properties` : "";
+}
+
 // CoAX and CoXAM support different levels for some IVs (XAI Type, XAI Method,
 // User Task). Returns the selected levels of an IV entry that the given
 // model/framework does NOT support, so the UI can flag the mismatch.
@@ -417,7 +426,7 @@ export function dvUnsupportedByAgent(measure: string, agent: string): boolean {
 }
 
 // Whether a dataset pick is outside what the model/framework supports, per the
-// Dataset IV catalog (e.g. Mushroom is CoXAM-only, Adult Income CoAX-only).
+// Dataset IV catalog (e.g. Mushroom is CoXAM-only; Sim2Real uses Adult Income).
 export function datasetUnsupportedByAgent(dataset: string, agent: string): boolean {
   const f = IV_CATALOG.find((x) => x.id === "dataset");
   const supported = (f?.levelsByAgent?.[agent] ?? []).map(normalizeLevel);

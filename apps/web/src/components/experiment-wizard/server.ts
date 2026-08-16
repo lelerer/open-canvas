@@ -836,8 +836,7 @@ export function frameworkFor(userModel: string, hasXaiPropertyIv: boolean): Stud
  * runs on its defaults. The server accepts either its own parameter names or
  * the UI's display labels, so the config is forwarded as-is.
  *
- * CoAX is the exception: its parameters are nested per (xai_type,
- * tested_w_xai) condition, so a flat config cannot be forwarded at all.
+ * CoAX, CoXAM, and Sim2Real each accept their corresponding parameter payload.
  */
 export function simulateOptionsFor(
   userModel: string,
@@ -850,16 +849,12 @@ export function simulateOptionsFor(
   const hasValues = Object.keys(values).length > 0;
   const options: SimulateOptions = { mode };
 
-  if (framework === "coxam" && hasValues) options.coxam_eval_params = values;
+  if (framework === "coax" && hasValues) options.coax_params = values;
+  else if (framework === "coxam" && hasValues) options.coxam_eval_params = values;
   else if (framework === "sim2real" && hasValues) options.sim2real_params = values;
   else if (framework === "baseline") options.baseline_model_id = userModel.trim();
 
-  const warning =
-    framework === "coax" && hasValues
-      ? "CoAX cognitive parameters are nested per condition on the server, so the flat values set on the User Model page can't be forwarded — this run uses the fitted CoAX defaults."
-      : undefined;
-
-  return { framework, options, warning };
+  return { framework, options };
 }
 
 export type StageStatus = "pending" | "running" | "succeeded" | "failed";

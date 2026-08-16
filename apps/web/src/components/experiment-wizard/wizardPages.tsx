@@ -17,7 +17,7 @@ import {
   STUDY_DATASETS, EXPLANATION_FORMS, INTERFACE_ELEMENTS, EXPLANATION_PROPERTIES,
   formOf, namespaceOf, elementsOf, instanceRangeFor, testInstanceHint, defaultSim2realInstanceIds,
   apparatusForTrial, trialStudyUrl, trialShowedXai,
-  studyNaturalSize, hasXaiPropertyIv,
+  studyNaturalSize, hasXaiPropertyIv, xaiPropertyModelConflict,
   sim2realPropertyOf, unsupportedIvLevels, ivFactorUnsupportedByAgent,
 } from "./questions";
 import { buildExportJson } from "./wizardReview";
@@ -697,6 +697,15 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
             return conflicts.length ? (
               <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                 {agentOfModel} does not support {conflicts.join(" · ")} from your Study Design — adjust the IVs there or pick the other model.
+              </p>
+            ) : null;
+          })()}
+          {(() => {
+            // XAI Property is a Sim2Real-only IV — CoAX/CoXAM can't run it.
+            const conflict = xaiPropertyModelConflict(a);
+            return conflict ? (
+              <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                {conflict} — pick Sim2Real instead.
               </p>
             ) : null;
           })()}
