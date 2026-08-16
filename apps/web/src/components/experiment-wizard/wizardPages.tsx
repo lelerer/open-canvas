@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, type ReactNode } from "react";
-import { Upload, Plus, X, Wand2, ChevronLeft, ChevronRight, Play, BarChart3, Check, Download, Bot, User } from "lucide-react";
+import { Upload, Plus, X, Wand2, ChevronLeft, ChevronRight, ChevronDown, Play, BarChart3, Check, Download, Bot, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -20,12 +20,12 @@ import {
   studyNaturalSize, hasXaiPropertyIv, xaiPropertyModelConflict,
   sim2realPropertyOf, unsupportedIvLevels, ivFactorUnsupportedByAgent,
 } from "./questions";
-import { buildExportJson } from "./wizardReview";
+import { buildExportJson, downloadFile } from "./wizardReview";
 import {
   ApiConfig, DEFAULT_API_BASE, API_BASE_KEY, API_TOKEN_KEY, SimulationMode,
   StageProgress, RunOutcome, runStudy, simulateOptionsFor, downloadResultsCsv, pngDataUris,
-  TrialView, trialViewOf, runPostHoc, tablesFrom, formatCell, SimpleTable,
-  dvColumnsOf, matchDvColumn, getAllResults, runAnalysis, plotGrid,
+  TrialView, trialViewOf, runPostHoc, tablesFrom, formatCell, SimpleTable, tableToCsv, ResultRow,
+  dvColumnsOf, allColumnsOf, matchDvColumn, getAllResults, runAnalysis, plotGrid,
   dvCoercionWarnings, plotInteraction, ivColumnsOf,
   getHumanComparison, humanComparisonStudyFor, HumanComparisonResponse,
 } from "./server";
@@ -950,7 +950,14 @@ export function TrialPreview({ view, caseNumber, url }: { view: TrialView; caseN
 
 // Renders whatever rows the server returned — columns follow the payload, so
 // this survives the analysis / post-hoc schemas changing shape.
-function StatTable({ table }: { table: SimpleTable }) {
+const slugifyLabel = (label: string) =>
+  label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "table";
+
+// Header (~29px) + N rows (~29px each), so the box crops right after the Nth
+// row rather than showing a sliver of the next one.
+const rowCapStyle = (n: number): React.CSSProperties => ({ maxHeight: `${29 + n * 29}px` });
+
+function StatTable({ table, maxVisibleRows }: { table: SimpleTable; maxVisibleRows?: number }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [overflow, setOverflow] = useState(false);
   const [atEnd, setAtEnd] = useState(false);
@@ -979,15 +986,28 @@ function StatTable({ table }: { table: SimpleTable }) {
             scroll for {table.columns.length} columns <ChevronRight className="h-3 w-3" />
           </span>
         ) : null}
+        <button
+          type="button"
+          onClick={() => downloadFile(`${slugifyLabel(table.label)}.csv`, tableToCsv(table), "text/csv")}
+          className={cn("shrink-0 text-neutral-400 hover:text-neutral-600", overflow ? "" : "ml-auto")}
+          title={`Download "${table.label || "table"}" as CSV`}
+          aria-label={`Download ${table.label || "table"} as CSV`}
+        >
+          <Download className="h-3.5 w-3.5" />
+        </button>
       </div>
       <div className="relative">
         {/* Fade on the right edge while there is more table off-screen. */}
         {overflow && !atEnd ? (
           <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-8 bg-gradient-to-l from-white to-transparent" />
         ) : null}
-        <div ref={scrollRef} className="overflow-x-auto">
+        <div
+          ref={scrollRef}
+          className={cn("overflow-x-auto", maxVisibleRows ? "overflow-y-auto" : "")}
+          style={maxVisibleRows ? rowCapStyle(maxVisibleRows) : undefined}
+        >
           <table className="w-full text-left text-xs">
-            <thead className="text-neutral-400">
+            <thead className={cn("text-neutral-400", maxVisibleRows ? "sticky top-0 bg-white" : "")}>
               <tr>
                 {table.columns.map((c) => (
                   <th key={c} className="whitespace-nowrap px-3 py-1.5 font-medium">{c.replace(/_/g, " ")}</th>
@@ -1006,6 +1026,61 @@ function StatTable({ table }: { table: SimpleTable }) {
           </table>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Collapsed by default — a run's raw rows run into the thousands, so they
+// stay off-screen until asked for; the CSV download above is still the way
+// to get the full, untruncated data.
+const RAW_TABLE_ROW_CAP = 200;
+
+function RawResultsTable({ rows }: { rows: ResultRow[] }) {
+  const [open, setOpen] = useState(false);
+  if (!rows.length) return null;
+  const columns = allColumnsOf(rows);
+  const shown = rows.slice(0, RAW_TABLE_ROW_CAP);
+
+  return (
+    <div className="rounded-xl border border-neutral-200">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left"
+        aria-expanded={open}
+      >
+        <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-neutral-400 transition-transform", open ? "" : "-rotate-90")} />
+        <p className="text-xs font-medium text-neutral-500">Raw results table ({rows.length} row{rows.length === 1 ? "" : "s"})</p>
+      </button>
+      {open ? (
+        <div className="border-t border-neutral-100">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="text-neutral-400">
+                <tr>
+                  {columns.map((c) => (
+                    <th key={c} className="whitespace-nowrap px-3 py-1.5 font-medium">{c.replace(/_/g, " ")}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="text-neutral-700">
+                {shown.map((r, i) => (
+                  <tr key={i} className="border-t border-neutral-100">
+                    {columns.map((c) => (
+                      <td key={c} className="whitespace-nowrap px-3 py-1.5 font-mono">{formatCell(r[c])}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {rows.length > RAW_TABLE_ROW_CAP ? (
+            <p className="border-t border-neutral-100 px-3 py-2 text-[11px] text-neutral-400">
+              Showing first {RAW_TABLE_ROW_CAP} of {rows.length} rows — use Results CSV for the full data.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1156,6 +1231,7 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
   const [pid, setPid] = useState("");
   const [cond, setCond] = useState("");
   const [resultView, setResultView] = useState<"trial" | "overall" | "human">("trial");
+  const [pairwiseOpen, setPairwiseOpen] = useState(true);
   const [dv, setDv] = useState("");
   const [posthoc, setPosthoc] = useState<unknown>(null);
   const [posthocErr, setPosthocErr] = useState("");
@@ -1748,7 +1824,15 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
 
                   <div className="space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Pairwise comparisons</p>
+                      <button
+                        type="button"
+                        onClick={() => setPairwiseOpen((o) => !o)}
+                        className="flex items-center gap-1.5"
+                        aria-expanded={pairwiseOpen}
+                      >
+                        <ChevronDown className={cn("h-3.5 w-3.5 text-neutral-400 transition-transform", pairwiseOpen ? "" : "-rotate-90")} />
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Pairwise comparisons</p>
+                      </button>
                       {dvOptions.length > 1 ? (
                         <select
                           value={activeDv}
@@ -1760,24 +1844,27 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
                         </select>
                       ) : activeDv ? <span className="text-xs text-neutral-400">{activeDv}</span> : null}
                     </div>
-                    {posthocErr ? (
-                      <p className="text-xs text-amber-700">{posthocErr}</p>
-                    ) : posthocTables.length ? (
-                      posthocTables.map((t, i) => (<StatTable key={i} table={t} />))
-                    ) : (
-                      <p className="text-xs text-neutral-400">{activeDv ? "Loading pairwise comparisons…" : "Set a dependent variable on the Study Design page to see pairwise comparisons."}</p>
-                    )}
+                    {pairwiseOpen ? (
+                      posthocErr ? (
+                        <p className="text-xs text-amber-700">{posthocErr}</p>
+                      ) : posthocTables.length ? (
+                        posthocTables.map((t, i) => (<StatTable key={i} table={t} maxVisibleRows={5} />))
+                      ) : (
+                        <p className="text-xs text-neutral-400">{activeDv ? "Loading pairwise comparisons…" : "Set a dependent variable on the Study Design page to see pairwise comparisons."}</p>
+                      )
+                    ) : null}
                   </div>
                 </div>
               )}
             </div>
 
-            {/* The raw rows are downloaded, not rendered — a run is thousands of
-                them, and the trial viewer above is the readable form. */}
             {rows.length ? (
-              <p className="text-xs text-neutral-400">
-                {rows.length} row{rows.length === 1 ? "" : "s"} · {participantIds.length} participant{participantIds.length === 1 ? "" : "s"} in {activeCond || "this run"} — use Results CSV for the full data.
-              </p>
+              <div className="space-y-2">
+                <p className="text-xs text-neutral-400">
+                  {rows.length} row{rows.length === 1 ? "" : "s"} · {participantIds.length} participant{participantIds.length === 1 ? "" : "s"} in {activeCond || "this run"} — use Results CSV for the full data.
+                </p>
+                <RawResultsTable rows={rows} />
+              </div>
             ) : null}
           </div>
         ) : (
