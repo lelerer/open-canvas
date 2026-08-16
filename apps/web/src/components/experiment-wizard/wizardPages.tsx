@@ -25,7 +25,7 @@ import {
   ApiConfig, DEFAULT_API_BASE, API_BASE_KEY, API_TOKEN_KEY, SimulationMode,
   StageProgress, RunOutcome, runStudy, simulateOptionsFor, downloadResultsCsv, pngDataUris,
   TrialView, trialViewOf, runPostHoc, tablesFrom, formatCell, SimpleTable, tableToCsv, ResultRow,
-  dvColumnsOf, allColumnsOf, matchDvColumn, getAllResults, runAnalysis, plotGrid,
+  dvColumnsOf, allColumnsOf, isHiddenResultColumn, matchDvColumn, getAllResults, runAnalysis, plotGrid,
   dvCoercionWarnings, plotInteraction, ivColumnsOf,
   getHumanComparison, humanComparisonStudyFor, HumanComparisonResponse,
 } from "./server";
@@ -1038,7 +1038,7 @@ const RAW_TABLE_ROW_CAP = 200;
 function RawResultsTable({ rows }: { rows: ResultRow[] }) {
   const [open, setOpen] = useState(false);
   if (!rows.length) return null;
-  const columns = allColumnsOf(rows);
+  const columns = allColumnsOf(rows).filter((c) => !isHiddenResultColumn(c));
   const shown = rows.slice(0, RAW_TABLE_ROW_CAP);
 
   return (

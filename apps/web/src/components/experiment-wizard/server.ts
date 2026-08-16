@@ -243,8 +243,40 @@ export function resultsCsvUrl(cfg: ApiConfig, studyId: string, q: { phase?: stri
   return apiUrl(cfg, `/api/studies/${encodeURIComponent(studyId)}/results.csv`, q);
 }
 
+// Internal timing instrumentation, not a result — noisy in both the raw
+// results table and its CSV. Matched loosely (case/separator-insensitive) so
+// "pred_time", "predTime" and "pred time" are all the same column.
+const HIDDEN_RESULT_COLUMNS = new Set(["feedbacktime", "predtime"]);
+export const normalizeColumnKey = (s: string) => s.toLowerCase().replace(/[\s_-]/g, "");
+export const isHiddenResultColumn = (name: string) => HIDDEN_RESULT_COLUMNS.has(normalizeColumnKey(name));
+
+// Minimal RFC 4180 parser — quoted fields, escaped "" quotes, commas/newlines
+// inside quotes. Good enough for the server's own CSV export, not a general
+// tool.
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; } else inQuotes = false;
+      } else field += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
+    else if (c !== "\r") field += c;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
 // The CSV endpoint needs the bearer header when the server is tokened, so it is
-// fetched rather than linked, then handed to the browser as a blob.
+// fetched rather than linked, then handed to the browser as a blob. Parsed and
+// re-serialized (rather than a raw passthrough) so hidden columns can be
+// dropped the same way as the raw results table.
 export async function downloadResultsCsv(cfg: ApiConfig, studyId: string, filename = "results.csv"): Promise<void> {
   let res: Response;
   try {
@@ -253,7 +285,12 @@ export async function downloadResultsCsv(cfg: ApiConfig, studyId: string, filena
     throw new ApiError(`Could not reach the study server at ${cfg.baseUrl || DEFAULT_API_BASE}.`, undefined, e);
   }
   if (!res.ok) throw new ApiError(`${res.status}: could not download the results CSV.`, res.status);
-  const blob = await res.blob();
+  const text = await res.text();
+  const rows = parseCsv(text);
+  const header = rows[0] ?? [];
+  const keepIdx = header.map((_, i) => i).filter((i) => !isHiddenResultColumn(header[i]));
+  const filtered = rows.map((r) => keepIdx.map((i) => r[i] ?? ""));
+  const blob = new Blob([filtered.map((r) => r.map(csvCell).join(",")).join("\n")], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -312,9 +349,13 @@ export function dvColumnsOf(rows: ResultRow[]): string[] {
 // Every column present across a run's raw result rows, in first-seen order —
 // unfiltered (unlike dvColumnsOf/ivColumnsOf), for rendering the rows as-is
 // rather than picking out DVs/IVs.
+// Scans every row, not just a sample — some fields (e.g. an attribution
+// array) are only present on rows where that condition actually showed an
+// explanation, and which rows those are depends on the framework/trial
+// order, so an early sample can miss a column that later rows do have.
 export function allColumnsOf(rows: ResultRow[]): string[] {
   const seen: string[] = [];
-  for (const r of rows.slice(0, 50)) for (const k of Object.keys(r)) if (!seen.includes(k)) seen.push(k);
+  for (const r of rows) for (const k of Object.keys(r)) if (!seen.includes(k)) seen.push(k);
   return seen;
 }
 
