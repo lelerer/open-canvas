@@ -53,7 +53,7 @@ export function ExperimentWizard() {
     const { updates, ops } = payload;
     setAnswers((a) => {
       let next: Answers = { ...a };
-      const STRUCTURED = new Set(["sd_ivs", "sd_dv", "sd_cv", "sd_rv", "proc_steps", "ml_proxies", "cog_config", "apparatus_list"]);
+      const STRUCTURED = new Set(["sd_ivs", "sd_dv", "sd_cv", "sd_rv", "proc_steps", "cog_config", "apparatus_list"]);
       for (const [k, v] of Object.entries(updates)) {
         if (STRUCTURED.has(k)) continue; // handled below
         next[k] = v;
@@ -72,7 +72,6 @@ export function ExperimentWizard() {
       if (updates.sd_cv != null) { const s = parseArr(updates.sd_cv); if (s) next.sd_cv = JSON.stringify(normalizeVarSpecs(s)); }
       if (updates.sd_rv != null) { const s = parseArr(updates.sd_rv); if (s) next.sd_rv = JSON.stringify(normalizeVarSpecs(s)); }
       if (updates.proc_steps != null) { const s = parseArr(updates.proc_steps); if (s) next.proc_steps = JSON.stringify(normalizeProcSpecs(s)); }
-      if (updates.ml_proxies != null) { const s = parseArr(updates.ml_proxies); if (Array.isArray(s)) next.ml_proxies = JSON.stringify(s.map(String).filter(Boolean)); }
       if (updates.cog_config != null) {
         const s = parseArr(updates.cog_config);
         if (s && typeof s === "object" && !Array.isArray(s)) {

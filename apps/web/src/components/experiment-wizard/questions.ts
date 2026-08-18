@@ -37,15 +37,15 @@ export const DATASET_OPTIONS = [
   "Forest Cover",
 ];
 
-// ---- User models (cognitive models + comparison baselines) ----
+// ---- User models (cognitive models) ----
 // NOTE: full names / descriptions below are placeholders — please replace with the
-// authoritative text. Users can also add their own at runtime (stored locally).
+// authoritative text.
 export interface UserModel {
   id: string;
   name: string;
   full: string;
   description: string;
-  category: string; // "Cognitive model" | "Comparison baseline" | "Custom"
+  category: string; // "Cognitive model"
 }
 
 // tolerant parse for a stored list of ids (JSON array or comma-separated)
@@ -64,12 +64,6 @@ export const USER_MODELS: UserModel[] = [
   { id: "CoAX", name: "CoAX", full: "Interpreting Attribution XAI", description: "A cognitive user model of how people interpret attribution-based explanations (e.g. LIME / SHAP feature attributions).", category: "Cognitive model" },
   { id: COAX_XAI_PROPERTY, name: "Sim2Real", full: "Interpreting XAI with Different Properties", description: "The CoAX model for XAI-Property designs — how people interpret explanations that are faithful, sparse, robust or sparse_robust. Runs on the Sim2Real synthetic-AI interface.", category: "Cognitive model" },
   { id: "CoXAM", name: "CoXAM", full: "Interpreting Global XAI (Rules vs Weights)", description: "A cognitive user model of how people interpret global surrogate explanations — decision-tree rules vs logistic-regression weights.", category: "Cognitive model" },
-  // Comparison baselines (simple standard models run alongside for comparison):
-  { id: "KNN", name: "KNN", full: "k-Nearest Neighbours", description: "A simple, standard model used as a comparison baseline. Works with both CoAX and CoXAM.", category: "Comparison baseline" },
-  { id: "Decision Tree", name: "Decision Tree", full: "Decision tree", description: "A simple, standard model used as a comparison baseline. Works with both CoAX and CoXAM.", category: "Comparison baseline" },
-  { id: "MLP", name: "MLP", full: "Multi-layer perceptron", description: "A standard model used as a comparison baseline for CoAX.", category: "Comparison baseline" },
-  { id: "Linear Regression", name: "Linear Regression", full: "Linear regression", description: "A standard comparison baseline for CoXAM (forward simulation).", category: "Comparison baseline" },
-  { id: "Global SHAP", name: "Global SHAP", full: "Global SHAP", description: "A standard comparison baseline for CoXAM (counterfactual simulation).", category: "Comparison baseline" },
 ];
 
 export const DESIGN_TYPES = ["Within-subjects", "Between-subjects", "Mixed"] as const;
@@ -809,10 +803,6 @@ export function ivSummaryLines(a: Answers): string[] {
     const bal = e.alloc === "Within-subjects" && e.balancing ? `, ${e.balancing}` : "";
     return `IV ${i + 1}: ${e.label || "(factor not set)"} — ${e.levels || "(no levels)"} [${allocShort}-subjects${bal}]`;
   });
-}
-
-export function mlProxyNames(a: Answers): string {
-  return parseIdList(a.ml_proxies).map((id) => USER_MODELS.find((m) => m.id === id)?.name ?? id).join(", ");
 }
 
 export function cogConfigSummary(a: Answers): string {

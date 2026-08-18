@@ -5,10 +5,10 @@ import { Upload, Plus, X, Wand2, ChevronLeft, ChevronRight, ChevronDown, Play, B
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { ACCENT, InfoTip, TextInput } from "./wizardUi";
+import { ACCENT, InfoTip } from "./wizardUi";
 import {
   Page, PAGES, isPageComplete, Answers, parseIvs, parseDvs, dvDisplayName, parseProcSteps, ProcStep, PROC_STEP_TYPES,
-  USER_MODELS, UserModel, parseIdList, cognitiveParamsFor, CognitiveParam,
+  USER_MODELS, UserModel, cognitiveParamsFor, CognitiveParam,
   cognitiveAgentFor, cogParamType, cogParamRange, cogParamIssue,
   parseCogConfig, manipulatedCogParams, trialSplit,
   parseApparatusList, ApparatusEntry, normalizeApparatusEntry, ivGroupOptions,
@@ -602,39 +602,7 @@ export function ProcedureBody({ page, answers, setAnswer }: { page: Page; answer
 
 export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAnswer: (id: string, v: string) => void }) {
   const a = answers;
-  const [customs, setCustoms] = useState<UserModel[]>([]);
-  const [showAdd, setShowAdd] = useState(false);
-  const [draft, setDraft] = useState({ name: "", full: "", description: "", category: "Custom" });
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("experiment-user-models");
-      if (raw) setCustoms(JSON.parse(raw));
-    } catch { /* ignore */ }
-  }, []);
-  function persistCustoms(next: UserModel[]) {
-    setCustoms(next);
-    try { localStorage.setItem("experiment-user-models", JSON.stringify(next)); } catch { /* ignore */ }
-  }
-  function addCustom() {
-    const name = draft.name.trim();
-    if (!name) return;
-    const entry: UserModel = { id: name, name, full: draft.full.trim() || name, description: draft.description.trim() || "(custom model)", category: "Custom" };
-    persistCustoms([...customs, entry]);
-    setAnswer("user_model", name);
-    setDraft({ name: "", full: "", description: "", category: "Custom" });
-    setShowAdd(false);
-  }
-
-  const all = [...USER_MODELS, ...customs];
-  const userModels = all.filter((m) => m.category === "Cognitive model" || m.category === "Custom");
-  const proxies = all.filter((m) => m.category === "Comparison baseline");
-  const selectedProxies = parseIdList(a.ml_proxies);
-
-  function toggleProxy(id: string) {
-    const next = selectedProxies.includes(id) ? selectedProxies.filter((x) => x !== id) : [...selectedProxies, id];
-    setAnswer("ml_proxies", JSON.stringify(next));
-  }
+  const userModels = USER_MODELS.filter((m) => m.category === "Cognitive model");
 
   const cogAgent = cognitiveAgentFor(a.user_model);
   const cogParams: CognitiveParam[] = cogAgent ? cognitiveParamsFor(cogAgent) : [];
@@ -645,7 +613,7 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
   // Cognitive parameters manipulated as an IV in Study Design (kept in sync — those are varied, not fixed here).
   const manipulatedCog = manipulatedCogParams(a);
 
-  function Card({ m, on, multi, onClick }: { m: UserModel; on: boolean; multi: boolean; onClick: () => void }) {
+  function Card({ m, on, onClick }: { m: UserModel; on: boolean; onClick: () => void }) {
     return (
       <button
         type="button"
@@ -653,12 +621,11 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
         className={cn("flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors", on ? "border-transparent ring-2" : "border-neutral-200 hover:bg-neutral-50")}
         style={on ? ({ ["--tw-ring-color" as any]: ACCENT, borderColor: ACCENT } as React.CSSProperties) : undefined}
       >
-        <span className={cn("mt-0.5 grid h-5 w-5 shrink-0 place-items-center border", multi ? "rounded-[5px]" : "rounded-full", on ? "border-transparent text-white" : "border-neutral-300")} style={on ? { backgroundColor: ACCENT } : undefined}>
+        <span className={cn("mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border", on ? "border-transparent text-white" : "border-neutral-300")} style={on ? { backgroundColor: ACCENT } : undefined}>
           {on ? <Check className="h-3 w-3" /> : null}
         </span>
         <span className="min-w-0">
           <span className="block text-sm font-medium text-neutral-900">{m.name} <span className="font-normal text-neutral-400">· {m.full}</span></span>
-          {m.category !== "Cognitive model" ? <span className="mt-0.5 block text-sm text-neutral-500">{m.description}</span> : null}
         </span>
       </button>
     );
@@ -669,17 +636,17 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
       <h1 className="text-2xl font-semibold leading-snug tracking-tight">
         User model{" "}
         <InfoTip>
-          A <span className="font-medium text-neutral-800">user model</span> is a stand-in for a human participant — a program that simulates how a person would read the explanations and make decisions, so you can pilot the study without recruiting people yet. Pick the <span className="font-medium text-neutral-800">one</span> you're studying. <span className="font-medium text-neutral-800">Comparison baselines</span> are simpler, standard models (e.g. k-nearest-neighbours) you run alongside to compare against.
+          A <span className="font-medium text-neutral-800">user model</span> is a stand-in for a human participant — a program that simulates how a person would read the explanations and make decisions, so you can pilot the study without recruiting people yet. Pick the <span className="font-medium text-neutral-800">one</span> you're studying.
         </InfoTip>
       </h1>
-      <p className="mt-1 text-sm text-neutral-400">Pick the model you're studying, plus any baselines to compare against. Sections marked <span className="font-medium text-amber-500">*</span> are required.</p>
+      <p className="mt-1 text-sm text-neutral-400">Pick the model you're studying. Sections marked <span className="font-medium text-amber-500">*</span> are required.</p>
 
       <div className="mt-6 space-y-6">
         <div>
           <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400"><span className="mr-0.5 text-amber-500" title="Required">*</span>User model · select one</p>
           <div className="space-y-2">
             {userModels.map((m) => (
-              <Card key={m.id} m={m} multi={false} on={a.user_model === m.id} onClick={() => setAnswer("user_model", m.id)} />
+              <Card key={m.id} m={m} on={a.user_model === m.id} onClick={() => setAnswer("user_model", m.id)} />
             ))}
           </div>
           {(() => {
@@ -784,33 +751,6 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
           </div>
         ) : null}
 
-        <div>
-          <div className="mb-2 flex items-center gap-1.5"><p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Comparison baselines · select any</p><InfoTip>Simple, standard models (e.g. k-nearest-neighbours) run alongside your user model so you have something to compare its behaviour against. Optional.</InfoTip></div>
-          <div className="space-y-2">
-            {proxies.map((m) => (
-              <Card key={m.id} m={m} multi on={selectedProxies.includes(m.id)} onClick={() => toggleProxy(m.id)} />
-            ))}
-          </div>
-        </div>
-
-        {showAdd ? (
-          <div className="rounded-xl border border-neutral-200 p-3">
-            <p className="mb-2 text-sm font-medium text-neutral-800">Add a user model</p>
-            <div className="space-y-2">
-              <TextInput value={draft.name} onChange={(v) => setDraft({ ...draft, name: v })} placeholder="Short name (e.g. MyModel)" />
-              <TextInput value={draft.full} onChange={(v) => setDraft({ ...draft, full: v })} placeholder="Full name" />
-              <Textarea value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="One-line description" className="min-h-[60px] resize-y bg-white text-sm" />
-            </div>
-            <div className="mt-2 flex gap-2">
-              <button onClick={addCustom} className="rounded-md px-3 py-1.5 text-sm font-medium text-white" style={{ backgroundColor: ACCENT }}>Add</button>
-              <button onClick={() => setShowAdd(false)} className="rounded-md border border-neutral-200 px-3 py-1.5 text-sm text-neutral-600 hover:bg-neutral-50">Cancel</button>
-            </div>
-          </div>
-        ) : (
-          <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:bg-neutral-50">
-            <Plus className="h-4 w-4" /> Add your own user model
-          </button>
-        )}
       </div>
     </>
   );

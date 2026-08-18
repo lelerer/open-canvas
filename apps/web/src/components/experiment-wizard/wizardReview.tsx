@@ -8,7 +8,7 @@ import { ACCENT, SERIF } from "./wizardUi";
 import {
   Answers, PAGES, isPageComplete, parseIvs, totalCells, betweenCells, designDescriptor,
   parseDvs, dvSummary, dvDisplayName, parseVars, varsSummary, parseProcSteps, procStepsSummary,
-  validateParticipants, parseIdList, ivSummaryLines, participantTotals, mlProxyNames, cogConfigSummary,
+  validateParticipants, ivSummaryLines, participantTotals, cogConfigSummary,
   parseApparatusList, apparatusSummaryLines,
   cognitiveAgentFor, resolvedCogParams, cogParamsSummaryLines, parseCogConfig,
 } from "./questions";
@@ -43,7 +43,6 @@ export function buildExportText(a: Answers): string {
     ...(parseProcSteps(a.proc_steps).length ? procStepsSummary(parseProcSteps(a.proc_steps)) : ["(no steps)"]),
     "",
     "USER MODEL", v("user_model"),
-    `Comparison baselines: ${mlProxyNames(a) || "(none)"}`,
     `Cognitive config: ${cogConfigSummary(a) || "(defaults)"}`,
     ...(cogParamsSummaryLines(a).length ? ["Cognitive parameters:", ...cogParamsSummaryLines(a).map((l) => `  - ${l}`)] : []), "",
   ].join("\n");
@@ -81,12 +80,16 @@ export function buildExportJson(a: Answers): string {
     procedure: parseProcSteps(a.proc_steps),
     userModel: t("user_model"),
     cognitiveAgent: cognitiveAgentFor(a.user_model) || null,
-    mlProxyBaselines: parseIdList(a.ml_proxies),
+    // Comparison baselines were removed from the wizard — always send an empty
+    // list so stale saved answers can never reach the server.
+    mlProxyBaselines: [],
     cognitiveConfig: parseCogConfig(a),
     // Every parameter of the chosen cognitive model with the value actually in
     // play (user-set, varied as an IV, or the model's own default) + its bounds.
     cognitiveParameters: resolvedCogParams(a),
-    _rawAnswers: a,
+    // Strip the retired ml_proxies answer here too — old saved sessions may
+    // still carry it, and this JSON is what gets POSTed to the server.
+    _rawAnswers: { ...a, ml_proxies: undefined },
   };
   return JSON.stringify(obj, null, 2);
 }
@@ -132,7 +135,6 @@ export function buildExportDoc(a: Answers): string {
     ${parseProcSteps(a.proc_steps).length ? "<ol>" + parseProcSteps(a.proc_steps).filter((st) => (st.title || "").trim()).map((st) => `<li>${esc(st.title)}${(st.note || "").trim() ? ` — ${esc(st.note || "")}` : ""}${st.attachment ? ` (file: ${esc(st.attachment)})` : ""}${st.link ? ` (<a href="${esc(st.link)}">link</a>)` : ""}</li>`).join("") + "</ol>" : "<p><i>(no steps)</i></p>"}
     <h2>User Model</h2>
     <p>${t("user_model")}</p>
-    ${mlProxyNames(a) ? `<p><b>Comparison baselines:</b> ${esc(mlProxyNames(a))}</p>` : ""}
     ${cogConfigSummary(a) ? `<p><b>Cognitive config:</b> ${esc(cogConfigSummary(a))}</p>` : ""}
     ${cogParamsSummaryLines(a).length ? `<p><b>Cognitive parameters:</b></p><ul>${cogParamsSummaryLines(a).map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : ""}
   `;
@@ -262,7 +264,6 @@ export function ReviewPage({ answers, onJump }: { answers: Answers; onJump: (id:
         </RSection>
         <RSection title="User Model" done={isPageComplete(PAGES[4], a)} onJump={() => onJump("usermodel")}>
           <RRow label="User model" value={a.user_model} />
-          <RRow label="Comparison baselines" value={mlProxyNames(a)} />
           <RRow label="Cognitive config" value={cogConfigSummary(a)} />
           {cogParamsSummaryLines(a).length ? (
             <div className="grid grid-cols-[170px_1fr] gap-3 py-1.5 text-[15px]">

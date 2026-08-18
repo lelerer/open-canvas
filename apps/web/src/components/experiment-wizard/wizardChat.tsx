@@ -9,7 +9,7 @@ import {
   parseIvs, parseVars, varsSummary, parseDvs, dvSummary, dvDisplayName,
   parseProcSteps, procStepsSummary,
   normalizeIvSpecs, normalizeDvSpecs, normalizeVarSpecs, normalizeProcSpecs,
-  totalCells, mlProxyNames, cogConfigSummary, IvEntry, ivAgentFor, dedupeIvEntries,
+  totalCells, cogConfigSummary, IvEntry, ivAgentFor, dedupeIvEntries,
   parseApparatusList, normalizeApparatusEntry,
 } from "./questions";
 
@@ -23,14 +23,13 @@ export const ALL_FILLABLE = [
   "apparatus_list",
   "proc_steps",
   "user_model",
-  "ml_proxies",
   "cog_config",
 ];
 
 export const APPLY_KEYS = new Set(ALL_FILLABLE);
 // Keys whose APPLY value is a JSON array/object rather than a plain string.
 
-export const STRUCTURED_APPLY = new Set(["sd_ivs", "sd_dv", "sd_cv", "sd_rv", "proc_steps", "ml_proxies", "cog_config", "apparatus_list"]);
+export const STRUCTURED_APPLY = new Set(["sd_ivs", "sd_dv", "sd_cv", "sd_rv", "proc_steps", "cog_config", "apparatus_list"]);
 
 export const OP_TARGETS = new Set(["sd_dv", "sd_ivs", "sd_cv", "sd_rv", "proc_steps", "apparatus_list"]);
 
@@ -205,8 +204,8 @@ export const PAGE_CHAT: Record<string, { focus: string; fields: string[] }> = {
     fields: ["proc_steps"],
   },
   usermodel: {
-    focus: "the user model and baselines. You CAN set them: user_model (the cognitive model id, e.g. \"CoAX\" or \"CoXAM\"), ml_proxies (a JSON array of comparison-baseline ids), and cog_config (a JSON object of cognitive-parameter values). Help the user choose from the list.",
-    fields: ["user_model", "ml_proxies", "cog_config"],
+    focus: "the user model. You CAN set them: user_model (the cognitive model id, e.g. \"CoAX\" or \"CoXAM\") and cog_config (a JSON object of cognitive-parameter values). Help the user choose from the list.",
+    fields: ["user_model", "cog_config"],
   },
   review: {
     focus: "reviewing the overall design (there are no fields to fill on this page)",
@@ -234,7 +233,6 @@ export function buildChatContext(page: Page, a: Answers): string {
   lines.push(`- random variables (RV): ${varsSummary(parseVars(a.sd_rv)) || "(empty)"}`);
   lines.push(`- independent variables: ${ivLine}`);
   lines.push(`- procedure steps: ${procLine}`);
-  lines.push(`- comparison baselines: ${mlProxyNames(a) || "(none)"}`);
   lines.push(`- cognitive config: ${cogConfigSummary(a) || "(defaults)"}`);
   const overview = lines.join("\n");
 
