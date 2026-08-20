@@ -100,7 +100,7 @@ export function ExperimentWizard() {
           <span className="grid h-7 w-7 place-items-center rounded-md text-white" style={{ backgroundColor: ACCENT }}>
             <FileText className="h-4 w-4" />
           </span>
-          <span className="text-sm font-semibold tracking-tight">XAI Experiment Designer</span>
+          <span className="text-sm font-semibold tracking-tight">Experiment Co-designer</span>
         </div>
         <nav className="flex-1 space-y-0.5 px-3 pb-4">
           {PAGES.map((item, i) => {

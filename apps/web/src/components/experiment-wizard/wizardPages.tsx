@@ -639,7 +639,7 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
           A <span className="font-medium text-neutral-800">user model</span> is a stand-in for a human participant — a program that simulates how a person would read the explanations and make decisions, so you can pilot the study without recruiting people yet. Pick the <span className="font-medium text-neutral-800">one</span> you're studying.
         </InfoTip>
       </h1>
-      <p className="mt-1 text-sm text-neutral-400">Pick the model you're studying. Sections marked <span className="font-medium text-amber-500">*</span> are required.</p>
+      <p className="mt-1 text-sm text-neutral-400">Pick the model you want to use for your simulated experiment.</p>
 
       <div className="mt-6 space-y-6">
         <div>

@@ -12,7 +12,7 @@ import {
   parseApparatusList, apparatusSummaryLines,
   cognitiveAgentFor, resolvedCogParams, cogParamsSummaryLines, parseCogConfig,
 } from "./questions";
-import { buildSurvey, buildSurveyJson, buildQsf } from "./survey";
+import { buildSurvey, buildQsf } from "./survey";
 
 export function buildExportText(a: Answers): string {
   const v = (k: string) => (a[k] || "").trim() || "(not provided)";
@@ -194,21 +194,18 @@ export function ReviewPage({ answers, onJump }: { answers: Answers; onJump: (id:
 
   return (
     <div className="mx-auto w-full max-w-3xl px-8 py-10">
-      <div className="flex items-start justify-between gap-4" style={{ fontFamily: "ui-sans-serif, system-ui" }}>
+      <div style={{ fontFamily: "ui-sans-serif, system-ui" }}>
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Review & export</h1>
-          <p className="mt-1 text-sm text-neutral-500">A read-only summary of your design. Download it as a Word document or JSON.</p>
+          <p className="mt-1 text-sm text-neutral-500">You can download your design as a Word document, JSON, or a Qualtrics survey directly.</p>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        <div className="mt-4 flex flex-wrap items-center gap-2">
           <span className="text-sm text-neutral-400">Export:</span>
           <Button variant="outline" size="sm" onClick={() => downloadFile("experiment-design.doc", buildExportDoc(a), "application/msword")}>
             <Download className="mr-1 h-4 w-4" /> Word (.doc)
           </Button>
           <Button variant="outline" size="sm" onClick={() => downloadFile("experiment-design.json", buildExportJson(a), "application/json")}>
             <Download className="mr-1 h-4 w-4" /> Design JSON
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => downloadFile("survey.json", buildSurveyJson(a), "application/json")}>
-            <Download className="mr-1 h-4 w-4" /> Survey JSON
           </Button>
           <Button
             size="sm"

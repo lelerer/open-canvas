@@ -163,7 +163,7 @@ export function DvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer:
 
   return (
     <div style={{ fontFamily: "ui-sans-serif, system-ui" }}>
-      {items.length === 0 ? <p className="text-sm text-neutral-400">No dependent variables yet — add one below.</p> : null}
+      {items.length === 0 ? <p className="text-sm text-neutral-400">No dependent variables yet</p> : null}
 
       <div className="space-y-3">
         {items.map((e, i) => {
@@ -278,7 +278,7 @@ export function VariableList({ valueKey, answers, setAnswer, namePlaceholder }: 
 
   return (
     <div style={{ fontFamily: "ui-sans-serif, system-ui" }}>
-      {items.length === 0 ? <p className="text-sm text-neutral-400">None yet — add one below.</p> : null}
+      {items.length === 0 ? <p className="text-sm text-neutral-400">None yet</p> : null}
 
       <div className="space-y-2">
         {items.map((v, i) => {
@@ -653,7 +653,7 @@ export function IvBuilder({ answers, setAnswer }: { answers: Answers; setAnswer:
     <div style={{ fontFamily: "ui-sans-serif, system-ui" }}>
       <div className="space-y-3">
         {ivs.length === 0 ? (
-          <p className="text-sm text-neutral-400">No independent variables yet — add one below.</p>
+          <p className="text-sm text-neutral-400">No independent variables yet</p>
         ) : null}
 
         {ivs.map((entry, i) => {
