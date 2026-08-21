@@ -425,10 +425,6 @@ export function ApparatusBody({ page, answers, setAnswer }: { page: Page; answer
                           </div>
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-2">
-                          <code className="min-w-0 flex-1 truncate rounded-md border border-neutral-200 bg-neutral-50 px-2 py-1.5 text-xs text-neutral-600">{builtFor(e)}</code>
-                          <a href={builtFor(e)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md border border-neutral-200 px-3 py-1.5 text-sm text-neutral-600 hover:bg-neutral-50">Open ↗</a>
-                        </div>
                       </div>
                     );
                   })() : (
