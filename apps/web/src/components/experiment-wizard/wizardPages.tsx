@@ -25,7 +25,8 @@ import { buildExportJson, downloadFile } from "./wizardReview";
 import {
   ApiConfig, DEFAULT_API_BASE, API_BASE_KEY, API_TOKEN_KEY, SimulationMode,
   StageProgress, RunOutcome, runStudy, simulateOptionsFor, downloadResultsCsv, pngDataUris,
-  TrialView, trialViewOf, runPostHoc, tablesFrom, formatCell, SimpleTable, tableToCsv, ResultRow,
+  TrialView, TrialCounterfactual, trialViewOf, counterfactualVerdict, changeDisplayOf,
+  runPostHoc, tablesFrom, formatCell, SimpleTable, tableToCsv, ResultRow,
   dvColumnsOf, allColumnsOf, isHiddenResultColumn, matchDvColumn, getAllResults, runAnalysis, plotGrid,
   dvCoercionWarnings, plotInteraction, ivColumnsOf,
   getHumanComparison, humanComparisonStudyFor, HumanComparisonResponse,
@@ -789,6 +790,100 @@ function answerColor(v: string): string {
   return i < 0 ? "#1c1917" : ANSWER_COLORS[i];
 }
 
+// The counterfactual panel: what was proposed, what the AI did about it, and
+// whether that worked. Deliberately NOT the forward layout — a counterfactual
+// participant names an edit, not a class, so there is no "matched the AI" to
+// report and agent_prediction is the AI's own post-edit prediction.
+function CounterfactualBody({ view, cf }: { view: TrialView; cf: TrialCounterfactual }) {
+  // Only ever the resolved, human-readable name. The positional key ("a0") is
+  // for joins and debugging and is never shown to a researcher, so when the
+  // server-side lookup came back empty the change is rendered without a name
+  // rather than with its column id.
+  const featureName = cf.featureName;
+  // A change WAS proposed, we just can't name the feature — distinct from the
+  // empty state, where nothing was proposed at all.
+  const named = !!featureName;
+  const proposed = named || !!cf.featureKey;
+  // Binary features (mushroom's Gill / Shape / Bruises) are shown as whole
+  // steps; continuous ones keep two decimals. Display only — see changeDisplayOf.
+  const change = changeDisplayOf(cf, view.datasetId);
+  const moved = !!change?.moved;
+  const aiMoved = !!cf.aiAfter && cf.aiAfter !== cf.aiBefore;
+  const verdict = counterfactualVerdict(cf);
+  const verdictColor = verdict.tone === "win" ? ACCENT : verdict.tone === "lose" ? "#b45309" : "#78716c";
+  return (
+    <>
+      <p className="px-3 pb-1 pt-2 text-center text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">
+        Counterfactual
+      </p>
+
+      <div className="divide-y divide-neutral-100 border-t border-neutral-100">
+        <div className="flex items-center gap-3 px-4 py-2.5">
+          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-white" style={{ backgroundColor: "#1d4ed8" }}>
+            <Bot className="h-4 w-4" />
+          </span>
+          {/* The row still names who acted; "proposed change" qualifies WHAT they
+              produced, since a counterfactual participant names an edit rather
+              than a class. */}
+          <span className="w-32 shrink-0 text-[15px] text-neutral-400">Virtual Participant</span>
+          <span className="flex-1 font-mono text-[15px] font-semibold tracking-tight text-stone-900">
+            <span className="mr-2 font-sans text-[13px] font-normal text-neutral-400">Proposed change:</span>
+            {proposed ? (
+              <>
+                {named ? <span className="font-sans font-medium">{featureName}</span> : null}
+                {change ? (
+                  <>
+                    {" "}{change.before}
+                    <span className="mx-1.5 font-normal text-neutral-400">→</span>
+                    <span style={moved ? { color: "#1d4ed8" } : undefined}>{change.after}</span>
+                    {/* No chip on a clamp: "(+0.00)" states an amount of
+                        change that did not happen — the verdict line explains
+                        what was asked for instead. */}
+                    {change.delta ? (
+                      <span className="ml-1.5 text-[13px] font-normal text-neutral-400">({change.delta})</span>
+                    ) : null}
+                  </>
+                ) : null}
+              </>
+            ) : (
+              // Nothing was proposed: every change field is null, so this is a
+              // plain empty value — no arrow (which would look like a clamp)
+              // and no wording, since the verdict line below already says why.
+              <span className="font-sans font-normal text-neutral-300">—</span>
+            )}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-3 px-4 py-2.5">
+          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-white" style={{ backgroundColor: "#7c2d12" }}>
+            <span className="text-[9px] font-bold leading-none">AI</span>
+          </span>
+          <span className="w-32 shrink-0 text-[15px] text-neutral-400">AI prediction</span>
+          <span className="flex-1 font-mono text-[15px] font-semibold tracking-tight" style={{ color: answerColor(cf.aiBefore) }}>
+            {answerLabel(cf.aiBefore, view.answerKind)}
+            {cf.aiAfter ? (
+              <>
+                <span className="mx-1.5 font-normal text-neutral-400">→</span>
+                {/* Only the value that actually changed is coloured — a flat
+                    value in the accent reads as a success that didn't happen. */}
+                <span style={{ color: aiMoved ? answerColor(cf.aiAfter) : "#a8a29e" }}>
+                  {answerLabel(cf.aiAfter, view.answerKind)}
+                </span>
+              </>
+            ) : (
+              <span className="ml-1.5 text-[13px] font-normal text-neutral-400">(unchanged)</span>
+            )}
+          </span>
+        </div>
+      </div>
+
+      <p className="border-t border-neutral-100 px-4 py-2 text-xs" style={{ color: verdictColor }}>
+        {verdict.text}
+      </p>
+    </>
+  );
+}
+
 export function TrialPreview({ view, caseNumber, url }: { view: TrialView; caseNumber: number; url?: string }) {
   // Every design here (forward- or counterfactual-simulation, on every agent)
   // has the participant predict the AI, never the dataset's true label — so
@@ -860,31 +955,35 @@ export function TrialPreview({ view, caseNumber, url }: { view: TrialView; caseN
         </div>
       )}
 
-      <p className="px-3 pb-1 pt-2 text-center text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">
-        Prediction
-      </p>
+      {view.counterfactual ? <CounterfactualBody view={view} cf={view.counterfactual} /> : (
+        <>
+          <p className="px-3 pb-1 pt-2 text-center text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">
+            Prediction
+          </p>
 
-      <div className="divide-y divide-neutral-100 border-t border-neutral-100">
-        {rows.map((r) => (
-          <div key={r.key} className="flex items-center gap-3 px-4 py-2.5">
-            <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-white" style={{ backgroundColor: r.badge }}>
-              {r.icon}
-            </span>
-            <span className="w-32 shrink-0 text-[15px] text-neutral-400">{r.label}</span>
-            <span className="flex-1 font-mono text-[15px] font-semibold tracking-tight" style={{ color: answerColor(r.text) }}>
-              {answerLabel(r.text, view.answerKind)}
-            </span>
-            {r.note ? <span className="shrink-0 font-mono text-sm text-neutral-400">{r.note}</span> : null}
+          <div className="divide-y divide-neutral-100 border-t border-neutral-100">
+            {rows.map((r) => (
+              <div key={r.key} className="flex items-center gap-3 px-4 py-2.5">
+                <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-white" style={{ backgroundColor: r.badge }}>
+                  {r.icon}
+                </span>
+                <span className="w-32 shrink-0 text-[15px] text-neutral-400">{r.label}</span>
+                <span className="flex-1 font-mono text-[15px] font-semibold tracking-tight" style={{ color: answerColor(r.text) }}>
+                  {answerLabel(r.text, view.answerKind)}
+                </span>
+                {r.note ? <span className="shrink-0 font-mono text-sm text-neutral-400">{r.note}</span> : null}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
 
-      {view.matchesAi !== null ? (
-        // Amber rather than red for a mismatch: red already means "Type 1" above.
-        <p className="border-t border-neutral-100 px-4 py-2 text-xs" style={{ color: view.matchesAi ? ACCENT : "#b45309" }}>
-          {view.matchesAi ? "Virtual participant matched the AI prediction" : "Virtual participant differed from the AI prediction"}
-        </p>
-      ) : null}
+          {view.matchesAi !== null ? (
+            // Amber rather than red for a mismatch: red already means "Type 1" above.
+            <p className="border-t border-neutral-100 px-4 py-2 text-xs" style={{ color: view.matchesAi ? ACCENT : "#b45309" }}>
+              {view.matchesAi ? "Virtual participant matched the AI prediction" : "Virtual participant differed from the AI prediction"}
+            </p>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }

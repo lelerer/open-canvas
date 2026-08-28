@@ -726,6 +726,28 @@ export interface TrialPrediction {
   confidence: number | null;
 }
 
+// A CoXAM counterfactual trial. The participant proposes an EDIT (a feature and
+// an amount) rather than naming a class, and the run reports what the AI
+// predicted after that edit was applied — so none of the forward-simulation
+// rows mean what they say here. See trialCounterfactualOf.
+export interface TrialCounterfactual {
+  featureKey: string; // feature_changed, positional (a0…a5) — joins/debug only
+  featureName: string; // feature_changed_name — the one to display
+  valueBefore: number | null;
+  valueAfter: number | null;
+  // after − before, precomputed by the server. THIS is the amount of change to
+  // show: the environment adds an overshoot margin to the proposal and clamps
+  // to the feature's bounds, so `proposedDelta` is a number the model never saw.
+  appliedDelta: number | null;
+  proposedDelta: number | null; // delta — what was asked for; explains a clamp
+  aiBefore: string; // ai_prediction — the AI's class on the original case
+  aiAfter: string; // ai_prediction_counterfactual — its class after the edit
+  success: boolean; // counterfactual_success — the trial's outcome
+  invalidUnderCondition: boolean; // no valid proposal was possible; not a failure
+  strategy: string; // change_path_dt / zero_out_lr_displayed / …
+  treeDepth: number | null; // change_path_dt only; null elsewhere
+}
+
 export interface TrialView {
   instanceId: string;
   trialId: string;
@@ -748,6 +770,10 @@ export interface TrialView {
   probCorrect: number | null;
   matchesAi: boolean | null;
   predTime: number | null;
+  // Non-null only on counterfactual rows. Decided per row, not per study: a
+  // design can vary the task as an IV, putting both kinds of trial in one
+  // table, and forward rows leave these columns empty.
+  counterfactual: TrialCounterfactual | null;
 }
 
 // Result rows are untyped server-side, so every field is looked up across the
@@ -789,6 +815,158 @@ const PLACEHOLDER_CONDITIONS = new Set(["single_condition", "single", "default",
 function asNumber(v: unknown): number | null {
   const n = typeof v === "number" ? v : parseFloat(String(v ?? ""));
   return Number.isFinite(n) ? n : null;
+}
+
+// Reads the counterfactual block off a row, or null when this is not a
+// counterfactual trial. There is no study-level flag to check and adding one
+// would be wrong for mixed designs: forward rows simply leave these columns
+// empty, so counterfactual_success being present IS the discriminator.
+// feature_changed_name arrives title-cased from the study's dataset
+// ("Vinegar Taint", "Cap Diameter") except where the source column was never
+// capitalised ("chlorides"). Only names carrying NO capital at all are
+// title-cased here, so "pH" and "SO2" keep the casing they are meant to have.
+export function featureDisplayName(raw: string): string {
+  const name = (raw || "").trim();
+  if (!name || /[A-Z]/.test(name)) return name;
+  return name.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+}
+
+export function trialCounterfactualOf(row: ResultRow): TrialCounterfactual | null {
+  const flag = row.counterfactual_success ?? row.counterfactualSuccess;
+  if (flag === undefined || flag === null || flag === "") return null;
+
+  const asBool = (v: unknown): boolean => {
+    if (typeof v === "boolean") return v;
+    const t = String(v ?? "").trim().toLowerCase();
+    return t === "true" || t === "1";
+  };
+  // pick() skips "", which is right for names but would drop a legitimate 0.0
+  // feature value — these are read straight off the row instead.
+  const num = (...keys: string[]): number | null => {
+    for (const k of keys) {
+      const v = row[k];
+      if (v === undefined || v === null || v === "") continue;
+      const n = typeof v === "number" ? v : parseFloat(String(v));
+      if (Number.isFinite(n)) return n;
+    }
+    return null;
+  };
+
+  return {
+    featureKey: asText(pick(row, ["feature_changed", "featureChanged"])),
+    featureName: featureDisplayName(asText(pick(row, ["feature_changed_name", "featureChangedName"]))),
+    valueBefore: num("feature_value_before", "featureValueBefore"),
+    valueAfter: num("feature_value_after", "featureValueAfter"),
+    appliedDelta: num("applied_delta", "appliedDelta"),
+    proposedDelta: num("delta"),
+    aiBefore: asText(pick(row, ["ai_prediction", "ai_pred", "model_prediction"])),
+    aiAfter: asText(pick(row, ["ai_prediction_counterfactual", "aiPredictionCounterfactual"])),
+    success: asBool(flag),
+    invalidUnderCondition: asBool(row.invalid_under_condition ?? row.invalidUnderCondition),
+    strategy: asText(pick(row, ["selected_strategy", "selectedStrategy"])),
+    treeDepth: num("counterfactual_tree_depth", "counterfactualTreeDepth"),
+  };
+}
+
+// Two decimals everywhere, and an explicit sign on the amount of change so a
+// column of trials reads as a column. U+2212 for the minus, to match the digits.
+export const fmtValue = (n: number) => n.toFixed(2);
+export const fmtSigned = (n: number) => `${n < 0 ? "\u2212" : "+"}${Math.abs(n).toFixed(2)}`;
+
+// Binary (0/1) features, by dataset id. The counterfactual environment applies
+// a continuous delta and reports it verbatim, so a two-state variable can come
+// back mid-step (Shape 0.00 -> 0.50). The underlying variable has no half
+// state, so the panel shows whole steps for these. Datasets absent from this
+// map — wine quality, adult — are continuous throughout and never rounded.
+// Names as feature_changed_name spells them. Confirmed against real runs: on
+// mushrooms these three are the only features whose values stay within [0,1];
+// Height, Width and Cap Diameter are continuous. A range test would be wrong —
+// wine_quality's `chlorides` also sits inside [0,1] and is continuous — so the
+// binary set is listed explicitly rather than inferred.
+const BINARY_FEATURES: Record<string, string[]> = {
+  mushrooms: ["gill spacing", "shape", "bruises"],
+};
+
+export function isBinaryFeature(datasetId: string, featureName: string): boolean {
+  const names = BINARY_FEATURES[(datasetId || "").trim().toLowerCase()];
+  const f = (featureName || "").trim().toLowerCase();
+  return !!names && !!f && names.includes(f);
+}
+
+// Half away from zero: 0.5 -> 1, -0.6 -> -1, 0.1 -> 0.
+const roundStep = (n: number) => (n < 0 ? -1 : 1) * Math.round(Math.abs(n));
+
+export interface ChangeDisplay {
+  before: string;
+  after: string;
+  delta: string; // "" when there is no amount to show
+  moved: boolean; // whether the value actually changed, at display precision
+}
+
+// How the before/after pair and the amount are written out. Rounding is a
+// DISPLAY step only: applied_delta still carries what the environment applied,
+// and nothing here feeds the verdict or any export.
+export function changeDisplayOf(cf: TrialCounterfactual, datasetId: string): ChangeDisplay | null {
+  if (cf.valueBefore === null || cf.valueAfter === null) return null;
+  if (isBinaryFeature(datasetId, cf.featureName)) {
+    // A two-state variable only ever moves by a whole step, so ANY non-zero
+    // applied delta is shown as one — not rounded by magnitude. The environment
+    // applies a continuous delta (Bruises 0 -> 0.46 really is what the model was
+    // re-scored on), and rounding 0.46 down to "no change" would contradict the
+    // verdict on the 24 rows of a 720-trial run where such a nudge flipped the
+    // prediction. The flat "0 -> 0" is thereby reserved for a true clamp,
+    // where applied_delta is exactly 0.
+    const before = roundStep(cf.valueBefore);
+    const step = cf.appliedDelta === null || cf.appliedDelta === 0 ? 0 : cf.appliedDelta < 0 ? -1 : 1;
+    const after = Math.min(1, Math.max(0, before + step));
+    const d = after - before;
+    return {
+      before: String(before),
+      after: String(after),
+      delta: d === 0 ? "" : `${d < 0 ? "\u2212" : "+"}${Math.abs(d)}`,
+      moved: d !== 0,
+    };
+  }
+  return {
+    before: fmtValue(cf.valueBefore),
+    after: fmtValue(cf.valueAfter),
+    delta: cf.appliedDelta !== null && cf.appliedDelta !== 0 ? fmtSigned(cf.appliedDelta) : "",
+    moved: cf.appliedDelta !== null && cf.appliedDelta !== 0,
+  };
+}
+
+// Why the trial came out the way it did, in the researcher's terms. Order
+// matters: "nothing was proposed" and "the proposal was impossible" both
+// produce an unmoved prediction, and reading either as a failed attempt blames
+// the participant for something they did not do.
+export function counterfactualVerdict(cf: TrialCounterfactual): { tone: "win" | "lose" | "neutral"; text: string } {
+  if (cf.invalidUnderCondition) {
+    return { tone: "neutral", text: "No valid change was possible under this trial's condition." };
+  }
+  if (!cf.featureKey && !cf.featureName) {
+    return { tone: "lose", text: "Could not recall a change to make." };
+  }
+  // Clamped at the feature's bound: the AI re-scored an identical case, so an
+  // unmoved prediction is the participant asking for something impossible
+  // rather than anything wrong with the model.
+  if (cf.appliedDelta === 0) {
+    // Never the positional key — without a resolved name the sentence drops it
+    // rather than printing "a0" at a researcher.
+    const name = cf.featureName;
+    const asked = cf.proposedDelta;
+    const dir = asked !== null && asked < 0 ? "lower" : "raise";
+    const bound = dir === "lower" ? "minimum" : "maximum";
+    const subject = name || "the feature";
+    return {
+      tone: "lose",
+      text: asked !== null
+        ? `Asked to ${dir} ${subject} by ${fmtValue(Math.abs(asked))}, but it was already at its ${bound}.`
+        : `${name ? name : "The feature"} was already at its ${bound}, so the AI saw an unchanged case.`,
+    };
+  }
+  return cf.success
+    ? { tone: "win", text: "The change flipped the AI's prediction." }
+    : { tone: "lose", text: "The change did not move the AI's prediction." };
 }
 
 // Column names below are the ones a real run emits (agent_prediction,
@@ -857,6 +1035,7 @@ export function trialViewOf(row: ResultRow): TrialView {
       return s === "true" || s === "1";
     })(),
     predTime: asNumber(pick(row, ["pred_time", "response_time", "rt"])),
+    counterfactual: trialCounterfactualOf(row),
   };
 }
 
