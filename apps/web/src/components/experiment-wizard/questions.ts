@@ -586,7 +586,7 @@ export const PAGES: Page[] = [
     kind: "text",
     prompt: "What are your research questions?",
     subtitle: "Everything else in this tool exists to answer these questions — the variables you measure, the conditions you compare, and the task participants do. Writing them down first keeps the rest of the design focused. A good research question names what you're comparing and what outcome you expect it to change (e.g. \"Does showing feature-attribution explanations improve people's ability to catch the AI's mistakes, compared to no explanation?\").",
-    hints: ["A rough direction is fine to start with is fine, you can also chat with the assistant on the right to sharpen them into a testable research question", "Number them RQ1, RQ2, … so you can refer back to them later."],
+    hints: ["A rough direction is fine to start with, you can also chat with the assistant on the right to sharpen them into a testable research question", "Number them RQ1, RQ2, … so you can refer back to them later."],
     placeholder: "RQ1: …\nRQ2: …",
     required: true,
   },
