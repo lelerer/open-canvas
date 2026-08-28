@@ -46,6 +46,10 @@ export interface UserModel {
   full: string;
   description: string;
   category: string; // "Cognitive model"
+  // The same model's identity when the design manipulates XAI Property. Only
+  // the display text differs — the card keeps `id`, and the model id that is
+  // stored and exported for such designs comes from effectiveUserModel().
+  xaiPropertyVariant?: { name: string; full: string; description: string };
 }
 
 // tolerant parse for a stored list of ids (JSON array or comma-separated)
@@ -58,11 +62,25 @@ export function parseIdList(raw: string | undefined): string[] {
 
 // The CoAX variant for XAI-Property designs. It runs on the Sim2Real
 // synthetic-AI interface, so it resolves to the "Sim2Real" IV/cognitive agent.
+// It is no longer a card of its own — CoAX takes on this identity whenever the
+// design manipulates XAI Property (see effectiveUserModel). The id stays the
+// value stored and exported for those designs, so older saves that picked it
+// directly still resolve the same way.
 export const COAX_XAI_PROPERTY = "CoAX (XAI Property)";
 
 export const USER_MODELS: UserModel[] = [
-  { id: "CoAX", name: "CoAX", full: "Interpreting Attribution XAI", description: "A cognitive user model of how people interpret attribution-based explanations (e.g. LIME / SHAP feature attributions).", category: "Cognitive model" },
-  { id: COAX_XAI_PROPERTY, name: "Sim2Real", full: "Interpreting XAI with Different Properties", description: "The CoAX model for XAI-Property designs — how people interpret explanations that are faithful, sparse, robust or sparse_robust. Runs on the Sim2Real synthetic-AI interface.", category: "Cognitive model" },
+  {
+    id: "CoAX",
+    name: "CoAX",
+    full: "Interpreting Attribution XAI",
+    description: "A cognitive user model of how people interpret attribution-based explanations (e.g. LIME / SHAP feature attributions).",
+    category: "Cognitive model",
+    xaiPropertyVariant: {
+      name: "CoAX",
+      full: "Interpret Attribution XAI with Different Desiderata",
+      description: "The CoAX model for XAI-Property designs — how people interpret explanations that are faithful, sparse, robust or sparse_robust. Runs on the Sim2Real synthetic-AI interface.",
+    },
+  },
   { id: "CoXAM", name: "CoXAM", full: "Interpreting Global XAI (Rules vs Weights)", description: "A cognitive user model of how people interpret global surrogate explanations — decision-tree rules vs logistic-regression weights.", category: "Cognitive model" },
 ];
 
@@ -381,7 +399,8 @@ export function hasXaiPropertyIv(a: Answers): boolean {
 // current user model, or "" when there's no conflict.
 export function xaiPropertyModelConflict(a: Answers): string {
   if (!hasXaiPropertyIv(a)) return "";
-  const agent = cognitiveAgentFor(a.user_model);
+  // CoAX resolves to Sim2Real here, so only CoXAM can still conflict.
+  const agent = cognitiveAgentForAnswers(a);
   return agent === "CoAX" || agent === "CoXAM" ? `${agent} cannot handle simulations for different XAI Properties` : "";
 }
 
@@ -683,10 +702,45 @@ export function cognitiveAgentFor(userModel: string | undefined): string {
   return (IV_AGENTS as readonly string[]).includes(m) ? m : "";
 }
 
+// The model id a design actually runs as. CoAX is one card in the UI, but with
+// an XAI Property IV it is the Sim2Real variant — so everything downstream
+// (cognitive parameters, IV levels, the exported design JSON) sees the same
+// COAX_XAI_PROPERTY id the old separate card used to store.
+export function effectiveUserModel(a: Answers): string {
+  const m = (a.user_model || "").trim();
+  return m === "CoAX" && hasXaiPropertyIv(a) ? COAX_XAI_PROPERTY : m;
+}
+
+// The cognitive agent for the design as a whole — cognitiveAgentFor, but aware
+// that CoAX resolves to Sim2Real under an XAI Property IV.
+export function cognitiveAgentForAnswers(a: Answers): string {
+  return cognitiveAgentFor(effectiveUserModel(a));
+}
+
+// Whether the CoAX card is showing its XAI-Property identity. Driven by the IV
+// rather than the selection, so the card already reads "…with Different
+// Desiderata" before anything is picked; the second clause keeps saves that
+// stored the old standalone id looking right.
+export function coaxIsXaiPropertyVariant(a: Answers): boolean {
+  return hasXaiPropertyIv(a) || (a.user_model || "").trim() === COAX_XAI_PROPERTY;
+}
+
+// The card text to show for a model, given the design's IVs.
+export function userModelDisplay(m: UserModel, a: Answers): UserModel {
+  return m.xaiPropertyVariant && coaxIsXaiPropertyVariant(a) ? { ...m, ...m.xaiPropertyVariant } : m;
+}
+
+// The card a stored user_model belongs to — COAX_XAI_PROPERTY from an older
+// save now selects the CoAX card.
+export function userModelCardFor(a: Answers): UserModel | null {
+  const m = effectiveUserModel(a);
+  return USER_MODELS.find((x) => x.id === m || (x.xaiPropertyVariant && m === COAX_XAI_PROPERTY && x.id === "CoAX")) || null;
+}
+
 // The agent used to resolve IV levels: the explicit choice, else the one behind
 // the chosen user model, else CoAX.
 export function ivAgentFor(a: Answers): string {
-  return (a.sd_iv_agent || "").trim() || cognitiveAgentFor(a.user_model) || "CoAX";
+  return (a.sd_iv_agent || "").trim() || cognitiveAgentForAnswers(a) || "CoAX";
 }
 
 // ---- Completeness ----
@@ -853,7 +907,7 @@ export interface ResolvedCogParam {
 }
 
 export function resolvedCogParams(a: Answers): ResolvedCogParam[] {
-  const agent = cognitiveAgentFor(a.user_model);
+  const agent = cognitiveAgentForAnswers(a);
   if (!agent) return [];
   const cfg = parseCogConfig(a);
   const manipulated = manipulatedCogParams(a);

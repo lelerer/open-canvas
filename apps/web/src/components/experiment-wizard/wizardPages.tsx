@@ -9,7 +9,8 @@ import { ACCENT, InfoTip } from "./wizardUi";
 import {
   Page, PAGES, isPageComplete, Answers, parseIvs, parseDvs, dvDisplayName, parseProcSteps, ProcStep, PROC_STEP_TYPES,
   USER_MODELS, UserModel, cognitiveParamsFor, CognitiveParam,
-  cognitiveAgentFor, cogParamType, cogParamRange, cogParamIssue,
+  cognitiveAgentForAnswers, userModelDisplay, userModelCardFor, effectiveUserModel,
+  cogParamType, cogParamRange, cogParamIssue,
   parseCogConfig, manipulatedCogParams, trialSplit,
   parseApparatusList, ApparatusEntry, normalizeApparatusEntry, ivGroupOptions,
   instanceIdsOf, trainingInstanceIdsOf,
@@ -600,8 +601,11 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
   const a = answers;
   const userModels = USER_MODELS.filter((m) => m.category === "Cognitive model");
 
-  const cogAgent = cognitiveAgentFor(a.user_model);
+  // CoAX resolves to the Sim2Real agent when the design manipulates XAI
+  // Property, so the parameter set below follows the IVs, not just the card.
+  const cogAgent = cognitiveAgentForAnswers(a);
   const cogParams: CognitiveParam[] = cogAgent ? cognitiveParamsFor(cogAgent) : [];
+  const selectedCard = userModelCardFor(a);
   const cogCfg: Record<string, string> = parseCogConfig(a);
   function setCog(name: string, val: string) {
     setAnswer("cog_config", JSON.stringify({ ...cogCfg, [name]: val }));
@@ -610,6 +614,7 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
   const manipulatedCog = manipulatedCogParams(a);
 
   function Card({ m, on, onClick }: { m: UserModel; on: boolean; onClick: () => void }) {
+    const d = userModelDisplay(m, a);
     return (
       <button
         type="button"
@@ -621,7 +626,7 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
           {on ? <Check className="h-3 w-3" /> : null}
         </span>
         <span className="min-w-0">
-          <span className="block text-sm font-medium text-neutral-900">{m.name} <span className="font-normal text-neutral-400">· {m.full}</span></span>
+          <span className="block text-sm font-medium text-neutral-900">{d.name} <span className="font-normal text-neutral-400">· {d.full}</span></span>
         </span>
       </button>
     );
@@ -642,12 +647,12 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
           <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400"><span className="mr-0.5 text-amber-500" title="Required">*</span>User model · select one</p>
           <div className="space-y-2">
             {userModels.map((m) => (
-              <Card key={m.id} m={m} on={a.user_model === m.id} onClick={() => setAnswer("user_model", m.id)} />
+              <Card key={m.id} m={m} on={selectedCard?.id === m.id} onClick={() => setAnswer("user_model", m.id)} />
             ))}
           </div>
           {(() => {
             // CoAX and CoXAM support different IV levels — flag conflicts with the Study Design.
-            const agentOfModel = a.user_model ? cognitiveAgentFor(a.user_model) || "CoAX" : "";
+            const agentOfModel = a.user_model ? cognitiveAgentForAnswers(a) || "CoAX" : "";
             if (!agentOfModel) return null;
             const conflicts = parseIvs(a)
               .map((e) => {
@@ -668,7 +673,7 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
             const conflict = xaiPropertyModelConflict(a);
             return conflict ? (
               <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                {conflict} — pick Sim2Real instead.
+                {conflict} — pick CoAX instead.
               </p>
             ) : null;
           })()}
@@ -676,7 +681,7 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
 
         {cogParams.length ? (
           <div>
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Cognitive parameters · {a.user_model}</p>
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-400">Cognitive parameters · {effectiveUserModel(a)}</p>
             <div className="space-y-2">
               {cogParams.map((p) => {
                 const manip = manipulatedCog[p.name];

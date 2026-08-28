@@ -10,7 +10,7 @@ import {
   parseDvs, dvSummary, dvDisplayName, parseVars, varsSummary, parseProcSteps, procStepsSummary,
   validateParticipants, ivSummaryLines, participantTotals, cogConfigSummary,
   parseApparatusList, apparatusSummaryLines,
-  cognitiveAgentFor, resolvedCogParams, cogParamsSummaryLines, parseCogConfig,
+  cognitiveAgentForAnswers, effectiveUserModel, resolvedCogParams, cogParamsSummaryLines, parseCogConfig,
 } from "./questions";
 import { buildSurvey, buildQsf } from "./survey";
 
@@ -42,7 +42,7 @@ export function buildExportText(a: Answers): string {
     "PROCEDURE",
     ...(parseProcSteps(a.proc_steps).length ? procStepsSummary(parseProcSteps(a.proc_steps)) : ["(no steps)"]),
     "",
-    "USER MODEL", v("user_model"),
+    "USER MODEL", effectiveUserModel(a) || "(not provided)",
     `Cognitive config: ${cogConfigSummary(a) || "(defaults)"}`,
     ...(cogParamsSummaryLines(a).length ? ["Cognitive parameters:", ...cogParamsSummaryLines(a).map((l) => `  - ${l}`)] : []), "",
   ].join("\n");
@@ -78,8 +78,11 @@ export function buildExportJson(a: Answers): string {
     },
     apparatus: parseApparatusList(a),
     procedure: parseProcSteps(a.proc_steps),
-    userModel: t("user_model"),
-    cognitiveAgent: cognitiveAgentFor(a.user_model) || null,
+    // CoAX under an XAI Property IV exports as "CoAX (XAI Property)" — the id
+    // the server resolves to the Sim2Real framework — even though the wizard
+    // now shows it as one CoAX card.
+    userModel: effectiveUserModel(a),
+    cognitiveAgent: cognitiveAgentForAnswers(a) || null,
     // Comparison baselines were removed from the wizard — always send an empty
     // list so stale saved answers can never reach the server.
     mlProxyBaselines: [],
@@ -134,7 +137,7 @@ export function buildExportDoc(a: Answers): string {
     <h2>Procedure</h2>
     ${parseProcSteps(a.proc_steps).length ? "<ol>" + parseProcSteps(a.proc_steps).filter((st) => (st.title || "").trim()).map((st) => `<li>${esc(st.title)}${(st.note || "").trim() ? ` — ${esc(st.note || "")}` : ""}${st.attachment ? ` (file: ${esc(st.attachment)})` : ""}${st.link ? ` (<a href="${esc(st.link)}">link</a>)` : ""}</li>`).join("") + "</ol>" : "<p><i>(no steps)</i></p>"}
     <h2>User Model</h2>
-    <p>${t("user_model")}</p>
+    <p>${esc(effectiveUserModel(a)) || "<i>(not provided)</i>"}</p>
     ${cogConfigSummary(a) ? `<p><b>Cognitive config:</b> ${esc(cogConfigSummary(a))}</p>` : ""}
     ${cogParamsSummaryLines(a).length ? `<p><b>Cognitive parameters:</b></p><ul>${cogParamsSummaryLines(a).map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : ""}
   `;
@@ -260,7 +263,7 @@ export function ReviewPage({ answers, onJump }: { answers: Answers; onJump: (id:
           ) : <REmpty />}
         </RSection>
         <RSection title="User Model" done={isPageComplete(PAGES[4], a)} onJump={() => onJump("usermodel")}>
-          <RRow label="User model" value={a.user_model} />
+          <RRow label="User model" value={effectiveUserModel(a)} />
           <RRow label="Cognitive config" value={cogConfigSummary(a)} />
           {cogParamsSummaryLines(a).length ? (
             <div className="grid grid-cols-[170px_1fr] gap-3 py-1.5 text-[15px]">
