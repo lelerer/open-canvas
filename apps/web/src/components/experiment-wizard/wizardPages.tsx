@@ -691,16 +691,11 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
                 const kind = cogParamType(p);
                 return (
                   <div key={p.name} className="rounded-xl border border-neutral-200 p-3">
+                    {/* No range or option list up here — the input below
+                        already shows the allowed values as its placeholder,
+                        and the default sits beside it. */}
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-sm font-medium text-neutral-800">{p.name}</span>
-                      {/* One place for the numbers: the allowed values, then
-                          the default the backend uses when the field is blank.
-                          Every parameter presents it the same way, so no note
-                          has to spell a default out in prose. */}
-                      <span className="shrink-0 text-xs text-neutral-400">
-                        {kind === "enum" ? (p.options || []).join(" · ") : range ? `range ${range.min} – ${range.max}` : ""}
-                        {p.default !== undefined ? <span className="text-neutral-500"> · default {p.default}</span> : null}
-                      </span>
                     </div>
                     {/* What it does on the first line; how to set it on a
                         dimmer second line, so a long parameter doesn't read as
@@ -735,6 +730,9 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
                                   </button>
                                 );
                               })}
+                              {p.default !== undefined ? (
+                                <span className="shrink-0 text-xs text-neutral-500">(default {p.default})</span>
+                              ) : null}
                             </div>
                           ) : (
                             <div className="mt-2 flex items-center gap-2 text-sm">
@@ -746,6 +744,9 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
                                 placeholder={range ? `${range.min} – ${range.max}` : ""}
                                 className={cn("w-28 border-0 border-b bg-transparent px-0 py-0.5 text-[15px] text-neutral-900 outline-none placeholder:text-neutral-400", bad ? "border-red-400 focus:border-red-500" : "border-neutral-200 focus:border-neutral-500")}
                               />
+                              {p.default !== undefined ? (
+                                <span className="shrink-0 text-xs text-neutral-500">(default {p.default})</span>
+                              ) : null}
                             </div>
                           )}
                           {issue ? (

@@ -197,21 +197,21 @@ export const IV_CATALOG: IvFactor[] = [
     cognitiveByAgent: {
       CoAX: [
         { name: "Retrieval Threshold", key: "retrieval_threshold", type: "float", min: -4.0, max: -0.5, default: -2.5,
-          note: "Memory capacity; higher = harder retrieval / more forgetting." },
+          note: "Memory capacity.", detail: "Higher = more forgetting. Lower = better recall." },
         { name: "Exemplar Distance Sensitivity", key: "sensitivity", type: "float", min: 1, max: 100, default: 13,
-          note: "How sensitive the participant is to similarity between instances — higher = it relies only on the most similar past examples." },
+          note: "How sensitive the participant is to similarity between instances.", detail: "Higher = only the closest examples, so more accurate. Lower = a wider spread, more interference." },
         { name: "Attended Features", key: "k", type: "integer", min: 1, max: 5, default: 3,
           note: "How many features the virtual participant is able to pay attention to when comparing instances." },
         { name: "Feature-Class Sensitivity", key: "scaling_factor", type: "float", min: 0.1, max: 8, default: 2.0,
-          note: "How strongly the shown attributions pull the prediction toward a class — higher = it follows the explanation more literally." },
+          note: "How strongly the shown attributions pull the prediction toward a class.", detail: "Higher = follows the explanation closely. Lower = largely ignores it." },
       ],
       CoXAM: [
         // The valid range depends on the user task, so the field spans both; the
         // detail line carries the per-task window and default.
-        { name: "Retrieval Threshold", key: "memory_recall_threshold", type: "float", min: -2.0, max: 2.0, step: 0.05, note: "Memory capacity; higher = harder retrieval / more forgetting.", detail: "Task-dependent: forward -1.0 to 2.0 (default 0.5); counterfactual -2.0 to 0.5 (default -0.75)." },
+        { name: "Retrieval Threshold", key: "memory_recall_threshold", type: "float", min: -2.0, max: 2.0, step: 0.05, note: "Memory capacity.", detail: "Higher = more forgetting. Lower = better recall. Task-dependent: forward -1.0 to 2.0 (default 0.5); counterfactual -2.0 to 0.5 (default -0.75)." },
         { name: "Opportunity Cost", key: "opportunity_cost", type: "float", min: 0.0, max: 0.02, step: 0.001, default: 0.01, note: "How the participant trades accuracy against time and effort.", detail: "Higher = quicker shortcuts; lower = slower and more thorough. Applies to both tasks." },
-        { name: "Diffusion Noise", key: "decision_noise", type: "float", min: 0.3, max: 0.7, step: 0.01, default: 0.4, note: "How carefully the participant weighs the evidence.", detail: "Higher = faster, closer to chance (0.60 at 0.7); lower = slower, more accurate (0.76 at 0.3). Forward simulation only." },
-        { name: "Counterfactual Margin", key: "counterfactual_overshoot_fraction", type: "float", min: 0.0, max: 0.5, step: 0.01, default: 0.25, note: "How far the participant moves a feature to flip the AI, as a fraction of its range.", detail: "Counterfactual simulation only." },
+        { name: "Diffusion Noise", key: "decision_noise", type: "float", min: 0.3, max: 0.7, step: 0.01, default: 0.4, note: "How much the participant's judgement wavers.", detail: "Higher = faster, closer to guessing. Lower = slower, more accurate. (Forward simulation only)" },
+        { name: "Counterfactual Margin", key: "counterfactual_overshoot_fraction", type: "float", min: 0.0, max: 0.5, step: 0.01, default: 0.25, note: "How far the participant moves a feature to flip the AI.", detail: "Higher = a bigger change. Lower = a smaller change. (Counterfactual simulation only)" },
       ],
       // CoAX (XAI Property) — the Sim2Real synthetic-AI study.
       Sim2Real: [
