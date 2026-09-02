@@ -691,13 +691,17 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
                 const kind = cogParamType(p);
                 return (
                   <div key={p.name} className="rounded-xl border border-neutral-200 p-3">
+                    {/* No range or option list up here — the input below
+                        already shows the allowed values as its placeholder,
+                        and the default sits beside it. */}
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-sm font-medium text-neutral-800">{p.name}</span>
-                      <span className="shrink-0 text-xs text-neutral-400">
-                        {kind === "enum" ? (p.options || []).join(" · ") : range ? `range ${range.min} – ${range.max}` : ""}
-                      </span>
                     </div>
-                    {p.note ? <p className="mt-0.5 text-xs text-neutral-400">{p.note}</p> : null}
+                    {/* What it does on the first line; how to set it on a
+                        dimmer second line, so a long parameter doesn't read as
+                        one block of grey. */}
+                    {p.note ? <p className="mt-0.5 text-xs text-neutral-500">{p.note}</p> : null}
+                    {p.detail ? <p className="mt-1 whitespace-pre-line text-xs leading-relaxed text-neutral-400">{p.detail}</p> : null}
                     {isManip ? (
                       <div className="mt-2 flex items-center gap-2 text-sm">
                         <span className="rounded px-1.5 py-0.5 text-[11px] font-medium text-white" style={{ backgroundColor: ACCENT }}>Manipulated in Study Design</span>
@@ -726,6 +730,9 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
                                   </button>
                                 );
                               })}
+                              {p.default !== undefined ? (
+                                <span className="shrink-0 text-xs text-neutral-500">(default {p.default})</span>
+                              ) : null}
                             </div>
                           ) : (
                             <div className="mt-2 flex items-center gap-2 text-sm">
@@ -737,6 +744,9 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
                                 placeholder={range ? `${range.min} – ${range.max}` : ""}
                                 className={cn("w-28 border-0 border-b bg-transparent px-0 py-0.5 text-[15px] text-neutral-900 outline-none placeholder:text-neutral-400", bad ? "border-red-400 focus:border-red-500" : "border-neutral-200 focus:border-neutral-500")}
                               />
+                              {p.default !== undefined ? (
+                                <span className="shrink-0 text-xs text-neutral-500">(default {p.default})</span>
+                              ) : null}
                             </div>
                           )}
                           {issue ? (
@@ -835,7 +845,7 @@ function CounterfactualBody({ view, cf }: { view: TrialView; cf: TrialCounterfac
                   <>
                     {" "}{change.before}
                     <span className="mx-1.5 font-normal text-neutral-400">→</span>
-                    <span style={moved ? { color: "#1d4ed8" } : undefined}>{change.after}</span>
+                    <span style={moved ? { color: "#1c1917" } : undefined} className={moved ? "font-semibold" : undefined}>{change.after}</span>
                     {/* No chip on a clamp: "(+0.00)" states an amount of
                         change that did not happen — the verdict line explains
                         what was asked for instead. */}
@@ -859,14 +869,15 @@ function CounterfactualBody({ view, cf }: { view: TrialView; cf: TrialCounterfac
             <span className="text-[9px] font-bold leading-none">AI</span>
           </span>
           <span className="w-32 shrink-0 text-[15px] text-neutral-400">AI prediction</span>
-          <span className="flex-1 font-mono text-[15px] font-semibold tracking-tight" style={{ color: answerColor(cf.aiBefore) }}>
+          <span className="flex-1 font-mono text-[15px] tracking-tight text-neutral-500">
             {answerLabel(cf.aiBefore, view.answerKind)}
             {cf.aiAfter ? (
               <>
                 <span className="mx-1.5 font-normal text-neutral-400">→</span>
-                {/* Only the value that actually changed is coloured — a flat
-                    value in the accent reads as a success that didn't happen. */}
-                <span style={{ color: aiMoved ? answerColor(cf.aiAfter) : "#a8a29e" }}>
+                {/* Only the value that actually changed is emphasised, and by
+                    weight rather than hue — a flat value in a strong colour
+                    reads as a success that didn't happen. */}
+                <span className={aiMoved ? "font-semibold text-stone-900" : "text-neutral-400"}>
                   {answerLabel(cf.aiAfter, view.answerKind)}
                 </span>
               </>

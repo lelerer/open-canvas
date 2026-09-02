@@ -109,7 +109,8 @@ export interface CognitiveParam {
   default?: string | number; // recommended starting value (what the wizard suggests)
   modelDefault?: string | number; // what the model itself uses when left blank
   softBounds?: boolean; // the backend accepts any value — min/max is an advisory window
-  note?: string;
+  note?: string; // one line: what the parameter does
+  detail?: string; // second line: how to set it, task scope, fitted values
 }
 
 export type IvKind = "categorical" | "range" | "binary" | "cognitive";
@@ -195,53 +196,37 @@ export const IV_CATALOG: IvFactor[] = [
     def: "Parameters of the cognitive user model (memory, attention, etc.).",
     cognitiveByAgent: {
       CoAX: [
-        { name: "Retrieval Threshold", min: -4.0, max: -0.97, note: "Memory capacity; higher = harder retrieval / more forgetting." },
-        { name: "Exemplar Distance Sensitivity", min: 1, max: 20, note: "How sensitive the virtual participant is to similarity between instances — higher = it relies only on the most similar past examples when judging a new one." },
-        { name: "Attended Features", min: 1, max: 5, note: "How many features the virtual participant is able to pay attention to when comparing instances." },
-        { name: "Feature-Class Sensitivity", min: 1, max: 8, note: "How strongly the shown feature attributions pull the virtual participant's prediction toward a class — higher = it follows the explanation more literally." },
+        { name: "Retrieval Threshold", key: "retrieval_threshold", type: "float", min: -4.0, max: -0.5, default: -2.5,
+          note: "Memory capacity.", detail: "Higher = more forgetting. Lower = better recall." },
+        { name: "Exemplar Distance Sensitivity", key: "sensitivity", type: "float", min: 1, max: 100, default: 13,
+          note: "How sensitive the participant is to similarity between instances.", detail: "Higher = only the closest examples, so more accurate. Lower = a wider spread, more interference." },
+        { name: "Attended Features", key: "k", type: "integer", min: 1, max: 5, default: 3,
+          note: "How many features the virtual participant is able to pay attention to when comparing instances." },
+        { name: "Feature-Class Sensitivity", key: "scaling_factor", type: "float", min: 0.1, max: 8, default: 2.0,
+          note: "How strongly the shown attributions pull the prediction toward a class.", detail: "Higher = follows the explanation closely. Lower = largely ignores it." },
       ],
       CoXAM: [
         // The valid range depends on the user task, so the field spans both; the
-        // note carries the per-task window and default.
-        { name: "Retrieval Threshold", key: "memory_recall_threshold", type: "float", min: -2.0, max: 2.0, step: 0.05, note: "How easily info is retrieved from memory. Valid range depends on the task — forward simulation: -1.0 to 2.0 (default 0.5); counterfactual simulation: -2.0 to 0.5 (default -0.75)." },
-        { name: "Opportunity Cost", key: "opportunity_cost", type: "float", min: 0.0, max: 0.02, step: 0.001, default: 0.01, note: "Accuracy-time tradeoff (computational rationality / RL). Forward simulation only." },
-        { name: "Diffusion Noise", key: "decision_noise", type: "float", min: 0.3, max: 0.7, step: 0.01, default: 0.4, note: "Stochasticity during forward simulation. Forward simulation only." },
-        { name: "Counterfactual Margin", key: "counterfactual_overshoot_fraction", type: "float", min: 0.0, max: 0.5, step: 0.01, default: 0.25, note: "Margin when evaluating counterfactual changes. Counterfactual simulation only." },
+        // detail line carries the per-task window and default.
+        { name: "Retrieval Threshold", key: "memory_recall_threshold", type: "float", min: -2.0, max: 2.0, step: 0.05, note: "Memory capacity.", detail: "Higher = more forgetting. Lower = better recall. Task-dependent: forward -1.0 to 2.0 (default 0.5); counterfactual -2.0 to 0.5 (default -0.75)." },
+        { name: "Opportunity Cost", key: "opportunity_cost", type: "float", min: 0.0, max: 0.02, step: 0.001, default: 0.01, note: "How the participant trades accuracy against time and effort.", detail: "Higher = quicker shortcuts; lower = slower and more thorough. Applies to both tasks." },
+        { name: "Diffusion Noise", key: "decision_noise", type: "float", min: 0.3, max: 0.7, step: 0.01, default: 0.4, note: "How much the participant's judgement wavers.", detail: "Higher = faster, closer to guessing. Lower = slower, more accurate. (Forward simulation only)" },
+        { name: "Counterfactual Margin", key: "counterfactual_overshoot_fraction", type: "float", min: 0.0, max: 0.5, step: 0.01, default: 0.25, note: "How far the participant changes a feature to flip the AI prediction.", detail: "Higher = a bigger change. Lower = a smaller change. (Counterfactual simulation only)" },
       ],
       // CoAX (XAI Property) — the Sim2Real synthetic-AI study.
       Sim2Real: [
-        {
-          name: "Max Features Attended",
-          key: "max_features_attended",
-          type: "integer",
-          min: 1,
-          max: 12,
-          step: 1,
-          default: 4,
-          modelDefault: 12,
-          note: "How many explanation features the simulated user attends to. The model itself defaults to all 12; 4 is the value that best matches the measured behaviour.",
-        },
-        {
-          name: "Aggregation Strategy",
-          key: "aggregation_strategy",
-          type: "enum",
-          options: ["attribution", "value_weighted"],
-          default: "value_weighted",
-          modelDefault: "attribution",
-          note: "How evidence from the attended features is combined into a decision.",
-        },
-        {
-          name: "Confidence Responsiveness",
-          key: "confidence_responsiveness",
-          type: "float",
-          min: -3.0,
-          max: 1.0,
-          step: 0.1,
-          default: -1.5,
-          modelDefault: 0.0,
-          softBounds: true,
-          note: "Applies to all aggregation strategies. Lower = more responsive to the change. The backend accepts any float; −3.0 to 1.0 is the evidence-supported window, with the optimum at −1.5 (flat between −2.0 and −1.0), which is most accurate to the measured effect.",
-        },
+        { name: "Max Features Attended", key: "max_features_attended", type: "integer", min: 1, max: 12,
+          default: 2, modelDefault: 2,
+          note: "How many explanation features the simulated user attends to.",
+          detail: "Higher = more features attended. Lower = fewer." },
+        { name: "Aggregation Strategy", key: "aggregation_strategy", type: "enum", options: ["attribution", "value_weighted"],
+          default: "attribution", modelDefault: "attribution",
+          note: "How the attended features' evidence is combined.",
+          detail: "attribution uses the attribution values alone.\nvalue_weighted is the product of attribution and feature values." },
+        { name: "Confidence Responsiveness", key: "confidence_responsiveness", type: "float", min: -1.0, max: 1.0,
+          default: 0.0, modelDefault: 0.0,
+          note: "How strongly the simulated person already reads the AI's prediction one way.",
+          detail: "Higher and lower = reads it more strongly toward one class or the other." },
       ],
     },
   },
@@ -904,6 +889,7 @@ export interface ResolvedCogParam {
   source: "set" | "manipulated" | "model default";
   softBounds?: boolean;
   note?: string;
+  detail?: string;
 }
 
 export function resolvedCogParams(a: Answers): ResolvedCogParam[] {
@@ -933,6 +919,7 @@ export function resolvedCogParams(a: Answers): ResolvedCogParam[] {
       ...(p.modelDefault !== undefined ? { modelDefault: p.modelDefault } : {}),
       ...(p.softBounds ? { softBounds: true } : {}),
       ...(p.note ? { note: p.note } : {}),
+      ...(p.detail ? { detail: p.detail } : {}),
       value: null,
       source: "model default",
     };
