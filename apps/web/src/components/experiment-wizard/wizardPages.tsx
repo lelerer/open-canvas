@@ -693,11 +693,20 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
                   <div key={p.name} className="rounded-xl border border-neutral-200 p-3">
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-sm font-medium text-neutral-800">{p.name}</span>
+                      {/* One place for the numbers: the allowed values, then
+                          the default the backend uses when the field is blank.
+                          Every parameter presents it the same way, so no note
+                          has to spell a default out in prose. */}
                       <span className="shrink-0 text-xs text-neutral-400">
                         {kind === "enum" ? (p.options || []).join(" · ") : range ? `range ${range.min} – ${range.max}` : ""}
+                        {p.default !== undefined ? <span className="text-neutral-500"> · default {p.default}</span> : null}
                       </span>
                     </div>
-                    {p.note ? <p className="mt-0.5 text-xs text-neutral-400">{p.note}</p> : null}
+                    {/* What it does on the first line; how to set it on a
+                        dimmer second line, so a long parameter doesn't read as
+                        one block of grey. */}
+                    {p.note ? <p className="mt-0.5 text-xs text-neutral-500">{p.note}</p> : null}
+                    {p.detail ? <p className="mt-1 text-xs leading-relaxed text-neutral-400">{p.detail}</p> : null}
                     {isManip ? (
                       <div className="mt-2 flex items-center gap-2 text-sm">
                         <span className="rounded px-1.5 py-0.5 text-[11px] font-medium text-white" style={{ backgroundColor: ACCENT }}>Manipulated in Study Design</span>
