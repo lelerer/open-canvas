@@ -701,7 +701,7 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
                         dimmer second line, so a long parameter doesn't read as
                         one block of grey. */}
                     {p.note ? <p className="mt-0.5 text-xs text-neutral-500">{p.note}</p> : null}
-                    {p.detail ? <p className="mt-1 text-xs leading-relaxed text-neutral-400">{p.detail}</p> : null}
+                    {p.detail ? <p className="mt-1 whitespace-pre-line text-xs leading-relaxed text-neutral-400">{p.detail}</p> : null}
                     {isManip ? (
                       <div className="mt-2 flex items-center gap-2 text-sm">
                         <span className="rounded px-1.5 py-0.5 text-[11px] font-medium text-white" style={{ backgroundColor: ACCENT }}>Manipulated in Study Design</span>
