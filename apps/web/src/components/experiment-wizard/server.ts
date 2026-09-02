@@ -885,6 +885,7 @@ export const fmtSigned = (n: number) => `${n < 0 ? "\u2212" : "+"}${Math.abs(n).
 // binary set is listed explicitly rather than inferred.
 const BINARY_FEATURES: Record<string, string[]> = {
   mushrooms: ["gill spacing", "shape", "bruises"],
+  adult: ["marital status", "sex"],
 };
 
 export function isBinaryFeature(datasetId: string, featureName: string): boolean {
@@ -908,7 +909,15 @@ export interface ChangeDisplay {
 // and nothing here feeds the verdict or any export.
 export function changeDisplayOf(cf: TrialCounterfactual, datasetId: string): ChangeDisplay | null {
   if (cf.valueBefore === null || cf.valueAfter === null) return null;
-  if (isBinaryFeature(datasetId, cf.featureName)) {
+  // Whole steps only while the values are actually inside the binary domain.
+  // The environment sometimes applies a delta that lands outside it (adult's
+  // Marital Status arriving at 2.49 on a 0/1 feature); rounding that to a state
+  // would hide a value the model should never have been scored on, and would
+  // print "1 -> 1" beside a flipped prediction. Out-of-domain rows fall through
+  // to the plain numeric rendering so the anomaly stays visible.
+  const inBinaryDomain =
+    cf.valueBefore >= 0 && cf.valueBefore <= 1 && cf.valueAfter >= 0 && cf.valueAfter <= 1;
+  if (isBinaryFeature(datasetId, cf.featureName) && inBinaryDomain) {
     // A two-state variable only ever moves by a whole step, so ANY non-zero
     // applied delta is shown as one — not rounded by magnitude. The environment
     // applies a continuous delta (Bruises 0 -> 0.46 really is what the model was

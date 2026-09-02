@@ -845,7 +845,7 @@ function CounterfactualBody({ view, cf }: { view: TrialView; cf: TrialCounterfac
                   <>
                     {" "}{change.before}
                     <span className="mx-1.5 font-normal text-neutral-400">→</span>
-                    <span style={moved ? { color: "#1d4ed8" } : undefined}>{change.after}</span>
+                    <span style={moved ? { color: "#1c1917" } : undefined} className={moved ? "font-semibold" : undefined}>{change.after}</span>
                     {/* No chip on a clamp: "(+0.00)" states an amount of
                         change that did not happen — the verdict line explains
                         what was asked for instead. */}
@@ -869,14 +869,15 @@ function CounterfactualBody({ view, cf }: { view: TrialView; cf: TrialCounterfac
             <span className="text-[9px] font-bold leading-none">AI</span>
           </span>
           <span className="w-32 shrink-0 text-[15px] text-neutral-400">AI prediction</span>
-          <span className="flex-1 font-mono text-[15px] font-semibold tracking-tight" style={{ color: answerColor(cf.aiBefore) }}>
+          <span className="flex-1 font-mono text-[15px] tracking-tight text-neutral-500">
             {answerLabel(cf.aiBefore, view.answerKind)}
             {cf.aiAfter ? (
               <>
                 <span className="mx-1.5 font-normal text-neutral-400">→</span>
-                {/* Only the value that actually changed is coloured — a flat
-                    value in the accent reads as a success that didn't happen. */}
-                <span style={{ color: aiMoved ? answerColor(cf.aiAfter) : "#a8a29e" }}>
+                {/* Only the value that actually changed is emphasised, and by
+                    weight rather than hue — a flat value in a strong colour
+                    reads as a success that didn't happen. */}
+                <span className={aiMoved ? "font-semibold text-stone-900" : "text-neutral-400"}>
                   {answerLabel(cf.aiAfter, view.answerKind)}
                 </span>
               </>
