@@ -216,7 +216,7 @@ export const IV_CATALOG: IvFactor[] = [
       // CoAX (XAI Property) — the Sim2Real synthetic-AI study.
       Sim2Real: [
         { name: "Max Features Attended", key: "max_features_attended", type: "integer", min: 1, max: 12,
-          default: 12, modelDefault: 12,
+          default: 2, modelDefault: 2,
           note: "How many explanation features the simulated user attends to.",
           detail: "Higher = more features attended. Lower = fewer." },
         { name: "Aggregation Strategy", key: "aggregation_strategy", type: "enum", options: ["attribution", "value_weighted"],
