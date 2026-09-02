@@ -208,10 +208,10 @@ export const IV_CATALOG: IvFactor[] = [
       CoXAM: [
         // The valid range depends on the user task, so the field spans both; the
         // detail line carries the per-task window and default.
-        { name: "Retrieval Threshold", key: "memory_recall_threshold", type: "float", min: -2.0, max: 2.0, step: 0.05, note: "Memory capacity; higher = harder retrieval / more forgetting.", detail: "Valid range depends on the task — forward simulation: -1.0 to 2.0 (default 0.5); counterfactual simulation: -2.0 to 0.5 (default -0.75)." },
-        { name: "Opportunity Cost", key: "opportunity_cost", type: "float", min: 0.0, max: 0.02, step: 0.001, default: 0.01, note: "How the participant balances getting it right against the time and mental effort it costs.", detail: "Higher = they protect their time and fall back on quick shortcuts; lower = they spend more effort on slower, more thorough strategies. Applies to both tasks." },
-        { name: "Diffusion Noise", key: "decision_noise", type: "float", min: 0.3, max: 0.7, step: 0.01, default: 0.4, note: "How carefully the participant weighs the evidence before answering.", detail: "Higher = faster and closer to a coin flip (0.60 accuracy at 0.7); lower = slower and more accurate (0.76 at 0.3). Forward simulation only." },
-        { name: "Counterfactual Margin", key: "counterfactual_overshoot_fraction", type: "float", min: 0.0, max: 0.5, step: 0.01, default: 0.25, note: "How much the participant alters a feature to flip the AI's answer, as a fraction of that feature's range.", detail: "Counterfactual simulation only." },
+        { name: "Retrieval Threshold", key: "memory_recall_threshold", type: "float", min: -2.0, max: 2.0, step: 0.05, note: "Memory capacity; higher = harder retrieval / more forgetting.", detail: "Task-dependent: forward -1.0 to 2.0 (default 0.5); counterfactual -2.0 to 0.5 (default -0.75)." },
+        { name: "Opportunity Cost", key: "opportunity_cost", type: "float", min: 0.0, max: 0.02, step: 0.001, default: 0.01, note: "How the participant trades accuracy against time and effort.", detail: "Higher = quicker shortcuts; lower = slower and more thorough. Applies to both tasks." },
+        { name: "Diffusion Noise", key: "decision_noise", type: "float", min: 0.3, max: 0.7, step: 0.01, default: 0.4, note: "How carefully the participant weighs the evidence.", detail: "Higher = faster, closer to chance (0.60 at 0.7); lower = slower, more accurate (0.76 at 0.3). Forward simulation only." },
+        { name: "Counterfactual Margin", key: "counterfactual_overshoot_fraction", type: "float", min: 0.0, max: 0.5, step: 0.01, default: 0.25, note: "How far the participant moves a feature to flip the AI, as a fraction of its range.", detail: "Counterfactual simulation only." },
       ],
       // CoAX (XAI Property) — the Sim2Real synthetic-AI study.
       Sim2Real: [
