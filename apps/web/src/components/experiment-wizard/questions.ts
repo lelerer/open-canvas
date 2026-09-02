@@ -211,7 +211,7 @@ export const IV_CATALOG: IvFactor[] = [
         { name: "Retrieval Threshold", key: "memory_recall_threshold", type: "float", min: -2.0, max: 2.0, step: 0.05, note: "Memory capacity.", detail: "Higher = more forgetting. Lower = better recall. Task-dependent: forward -1.0 to 2.0 (default 0.5); counterfactual -2.0 to 0.5 (default -0.75)." },
         { name: "Opportunity Cost", key: "opportunity_cost", type: "float", min: 0.0, max: 0.02, step: 0.001, default: 0.01, note: "How the participant trades accuracy against time and effort.", detail: "Higher = quicker shortcuts; lower = slower and more thorough. Applies to both tasks." },
         { name: "Diffusion Noise", key: "decision_noise", type: "float", min: 0.3, max: 0.7, step: 0.01, default: 0.4, note: "How much the participant's judgement wavers.", detail: "Higher = faster, closer to guessing. Lower = slower, more accurate. (Forward simulation only)" },
-        { name: "Counterfactual Margin", key: "counterfactual_overshoot_fraction", type: "float", min: 0.0, max: 0.5, step: 0.01, default: 0.25, note: "How far the participant moves a feature to flip the AI prediction.", detail: "Higher = a bigger change. Lower = a smaller change. (Counterfactual simulation only)" },
+        { name: "Counterfactual Margin", key: "counterfactual_overshoot_fraction", type: "float", min: 0.0, max: 0.5, step: 0.01, default: 0.25, note: "How far the participant changes a feature to flip the AI prediction.", detail: "Higher = a bigger change. Lower = a smaller change. (Counterfactual simulation only)" },
       ],
       // CoAX (XAI Property) — the Sim2Real synthetic-AI study.
       Sim2Real: [
