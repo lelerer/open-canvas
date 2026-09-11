@@ -236,6 +236,7 @@ export const IV_CATALOG: IvFactor[] = [
     label: "User Task",
     kind: "categorical",
     group: "Task",
+    hidden: true, // removed from the IV dropdown; kept so older saved designs still parse
     def: "What the user is asked to do (e.g. forward vs counterfactual simulation).",
     levelsByAgent: {
       CoAX: ["Forward simulation"],
