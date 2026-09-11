@@ -275,16 +275,22 @@ export function ChatPanel({ messages, setMessages, allowedFields, context, onApp
     const el = taRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    // Only grow for typed text — an empty box stays one row (scrollHeight
+    // would otherwise include the wrapped placeholder).
+    el.style.height = input ? `${Math.min(el.scrollHeight, 160)}px` : "";
   }, [input]);
+  
+const sleep = (ms:any) => new Promise((resolve) => setTimeout(resolve, ms));
 
   async function send() {
     const text = input.trim();
+    
     if (!text || loading) return;
     const next = [...messages, { role: "user" as const, content: text }];
     setMessages(next);
     setInput("");
     setLoading(true);
+   
     setMessages((m) => [...m, { role: "assistant", content: "" }]);
     try {
       const res = await fetch("/api/chat", {
@@ -301,6 +307,7 @@ export function ChatPanel({ messages, setMessages, allowedFields, context, onApp
         if (done) break;
         acc += decoder.decode(value, { stream: true });
         const visible = acc.split("@@APPLY@@")[0].trimEnd();
+        // await sleep(10000)
         setMessages((m) => {
           const copy = [...m];
           copy[copy.length - 1] = { role: "assistant", content: visible };
@@ -359,7 +366,7 @@ export function ChatPanel({ messages, setMessages, allowedFields, context, onApp
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
             rows={1}
-            placeholder="Describe your study, or answer the assistant…"
+            placeholder="Describe your study…"
             className="max-h-40 flex-1 resize-none overflow-y-auto rounded-xl border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-neutral-400"
           />
           <button onClick={send} disabled={loading || !input.trim()} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white disabled:opacity-40" style={{ backgroundColor: ACCENT }} aria-label="Send">
