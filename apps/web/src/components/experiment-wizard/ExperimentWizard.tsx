@@ -53,7 +53,7 @@ export function ExperimentWizard() {
     const { updates, ops } = payload;
     setAnswers((a) => {
       let next: Answers = { ...a };
-      const STRUCTURED = new Set(["sd_ivs", "sd_dv", "sd_cv", "sd_rv", "proc_steps", "cog_config", "apparatus_list"]);
+      const STRUCTURED = new Set(["sd_ivs", "sd_dv", "sd_cv", "sd_rv", "proc_steps", "cog_config", "cog_ranges", "apparatus_list"]);
       for (const [k, v] of Object.entries(updates)) {
         if (STRUCTURED.has(k)) continue; // handled below
         next[k] = v;
@@ -80,6 +80,28 @@ export function ExperimentWizard() {
           const merged: Record<string, string> = { ...existing };
           for (const [k, v] of Object.entries(s)) merged[k] = String(v);
           next.cog_config = JSON.stringify(merged);
+        }
+      }
+      // Ranges merge the same way. An exact value in cog_config would win
+      // over the range, so a parameter given a range drops its exact value.
+      if (updates.cog_ranges != null) {
+        const s = parseArr(updates.cog_ranges);
+        if (s && typeof s === "object" && !Array.isArray(s)) {
+          let ranges: Record<string, { min: number; max: number }> = {};
+          let config: Record<string, string> = {};
+          try { ranges = JSON.parse(next.cog_ranges || "{}"); } catch { ranges = {}; }
+          try { config = JSON.parse(next.cog_config || "{}"); } catch { config = {}; }
+          for (const [k, v] of Object.entries(s as Record<string, any>)) {
+            const min = Number(v?.min);
+            const max = Number(v?.max);
+            if (!Number.isFinite(min) || !Number.isFinite(max) || min > max) continue;
+            delete config[k];
+            delete ranges[k];
+            if (min === max) config[k] = String(min);
+            else ranges[k] = { min, max };
+          }
+          next.cog_ranges = JSON.stringify(ranges);
+          next.cog_config = JSON.stringify(config);
         }
       }
       if (updates.apparatus_list != null) {
