@@ -2,7 +2,6 @@
 
 import { useState, type ReactNode } from "react";
 import { Info } from "lucide-react";
-import * as SliderPrimitive from "@radix-ui/react-slider";
 import { cn } from "@/lib/utils";
 
 export const ACCENT = "#359793";
@@ -22,32 +21,6 @@ export function rangeErrors(minS: string, maxS: string, lo: number, hi: number):
   if (max != null && (Number.isNaN(max) || max < lo || max > hi)) errs.push(`End must be between ${lo} and ${hi}.`);
   if (min != null && max != null && !Number.isNaN(min) && !Number.isNaN(max) && min > max) errs.push("Start must be ≤ end.");
   return errs;
-}
-
-// Two-thumb slider for a min–max span; the thumbs may meet for a single value.
-export function RangeSlider({ min, max, step, value, onChange }: { min: number; max: number; step: number; value: [number, number]; onChange: (v: [number, number]) => void }) {
-  return (
-    <SliderPrimitive.Root
-      min={min}
-      max={max}
-      step={step}
-      value={value}
-      onValueChange={(v) => onChange([v[0], v[1]])}
-      className="relative flex h-5 w-full touch-none select-none items-center"
-    >
-      <SliderPrimitive.Track className="relative h-1.5 w-full grow overflow-hidden rounded-full bg-neutral-200">
-        <SliderPrimitive.Range className="absolute h-full" style={{ backgroundColor: ACCENT }} />
-      </SliderPrimitive.Track>
-      {["Minimum", "Maximum"].map((label) => (
-        <SliderPrimitive.Thumb
-          key={label}
-          aria-label={label}
-          className="block h-4 w-4 rounded-full border-2 bg-white shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-300"
-          style={{ borderColor: ACCENT }}
-        />
-      ))}
-    </SliderPrimitive.Root>
-  );
 }
 
 export function InfoTip({ children, label = "What's this?" }: { children: ReactNode; label?: string }) {

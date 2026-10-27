@@ -5,15 +5,13 @@ import { Upload, Plus, X, Wand2, ChevronLeft, ChevronRight, ChevronDown, Play, B
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { ACCENT, InfoTip, RangeSlider } from "./wizardUi";
+import { ACCENT, InfoTip } from "./wizardUi";
 import {
   Page, PAGES, isPageComplete, Answers, parseIvs, parseDvs, dvDisplayName, parseProcSteps, ProcStep, PROC_STEP_TYPES,
   USER_MODELS, UserModel, cognitiveParamsFor, CognitiveParam,
   cognitiveAgentForAnswers, userModelDisplay, userModelCardFor, effectiveUserModel,
   cogParamType, cogParamRange, cogParamIssue,
   parseCogConfig, manipulatedCogParams, trialSplit,
-  parseCogRanges, cogParamStep, snapToStep, cogRangesPayload, isFullRange, cogParamSpan,
-  IvEntry, ivLevelList,
   parseApparatusList, ApparatusEntry, normalizeApparatusEntry, ivGroupOptions,
   instanceIdsOf, trainingInstanceIdsOf,
   STUDY_UI_ROOT, STUDY_PARAM_DEFAULTS, buildStudyUrl,
@@ -29,7 +27,7 @@ import {
   StageProgress, RunOutcome, runStudy, simulateOptionsFor, downloadResultsCsv, pngDataUris,
   TrialView, TrialCounterfactual, trialViewOf, counterfactualVerdict, changeDisplayOf,
   runPostHoc, tablesFrom, formatCell, SimpleTable, tableToCsv, ResultRow,
-  dvColumnsOf, allColumnsOf, isHiddenResultColumn, conditionOfRow, conditionLabelOf, matchDvColumn, getAllResults, runAnalysis, plotGrid,
+  dvColumnsOf, allColumnsOf, isHiddenResultColumn, matchDvColumn, getAllResults, runAnalysis, plotGrid,
   dvCoercionWarnings, plotInteraction, ivColumnsOf,
   getHumanComparison, humanComparisonStudyFor, HumanComparisonResponse,
 } from "./server";
@@ -613,19 +611,6 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
   function setCog(name: string, val: string) {
     setAnswer("cog_config", JSON.stringify({ ...cogCfg, [name]: val }));
   }
-  // A collapsed range is a plain value in cog_config; a narrower span goes to
-  // cog_ranges. Passing null clears both, back to the whole range.
-  const cogRanges = parseCogRanges(a);
-  function setCogRange(name: string, span: [number, number] | null) {
-    const cfg = { ...cogCfg };
-    const ranges = { ...cogRanges };
-    delete cfg[name];
-    delete ranges[name];
-    if (span && span[0] === span[1]) cfg[name] = String(span[0]);
-    else if (span) ranges[name] = { min: span[0], max: span[1] };
-    setAnswer("cog_config", JSON.stringify(cfg));
-    setAnswer("cog_ranges", JSON.stringify(ranges));
-  }
   // Cognitive parameters manipulated as an IV in Study Design (kept in sync — those are varied, not fixed here).
   const manipulatedCog = manipulatedCogParams(a);
 
@@ -749,16 +734,6 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
                                 <span className="shrink-0 text-xs text-neutral-500">(default {p.default})</span>
                               ) : null}
                             </div>
-                          ) : range ? (
-                            <div className="mt-2">
-                              <ParamSlider
-                                p={p}
-                                span={cogParamSpan(a, p) ?? [range.min, range.max]}
-                                isDefault={!v.trim() && !cogRanges[p.name]}
-                                onChange={(s) => setCogRange(p.name, isFullRange(p, s) ? null : s)}
-                                onReset={() => setCogRange(p.name, null)}
-                              />
-                            </div>
                           ) : (
                             <div className="mt-2 flex items-center gap-2 text-sm">
                               <span className="text-neutral-500">Value:</span>
@@ -766,6 +741,7 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
                                 type="number"
                                 value={v}
                                 onChange={(e) => setCog(p.name, e.target.value)}
+                                placeholder={range ? `${range.min} – ${range.max}` : ""}
                                 className={cn("w-28 border-0 border-b bg-transparent px-0 py-0.5 text-[15px] text-neutral-900 outline-none placeholder:text-neutral-400", bad ? "border-red-400 focus:border-red-500" : "border-neutral-200 focus:border-neutral-500")}
                               />
                               {p.default !== undefined ? (
@@ -783,54 +759,12 @@ export function UserModelBody({ answers, setAnswer }: { answers: Answers; setAns
                 );
               })}
             </div>
-            <p className="mt-1.5 text-xs text-neutral-400">Each parameter starts at its whole range. Narrow it, or drag the handles together for one value — each virtual participant gets one of the model’s fitted values inside the range. Parameters manipulated as an IV in Study Design are shown here and stay in sync — set their range on the Study Design page.</p>
+            <p className="mt-1.5 text-xs text-neutral-400">Leave blank to use the model’s default. Parameters manipulated as an IV in Study Design are shown here and stay in sync — set their range on the Study Design page.</p>
           </div>
         ) : null}
 
       </div>
     </>
-  );
-}
-
-// One numeric parameter's slider: handles together = one value, apart = a
-// range the server picks fitted values from. Untouched, it spans the whole
-// range (`isDefault`).
-function ParamSlider({ p, span, isDefault, onChange, onReset }: {
-  p: CognitiveParam;
-  span: [number, number];
-  isDefault: boolean;
-  onChange: (span: [number, number]) => void;
-  onReset: () => void;
-}) {
-  const range = cogParamRange(p) ?? { min: span[0], max: span[1] };
-  const step = cogParamStep(p);
-  return (
-    <div className="max-w-sm">
-      <div className="flex items-baseline justify-between gap-3 text-sm">
-        <span className={isDefault ? "text-neutral-500" : "font-medium text-neutral-900"}>
-          {span[0] === span[1] ? span[0] : `${span[0]} – ${span[1]}`}
-          <span className="ml-1.5 text-xs font-normal text-neutral-400">
-            {isDefault ? "full range (default)" : span[0] === span[1] ? "one value" : "fitted values in range"}
-          </span>
-        </span>
-        {!isDefault ? (
-          <button type="button" onClick={onReset} className="shrink-0 text-xs text-neutral-500 underline-offset-2 hover:underline">Reset</button>
-        ) : null}
-      </div>
-      <div className="mt-2 max-w-[230px]">
-        <RangeSlider
-          min={range.min}
-          max={range.max}
-          step={step}
-          value={span}
-          onChange={([lo, hi]) => onChange([snapToStep(lo, step), snapToStep(hi, step)])}
-        />
-      </div>
-      <div className="mt-1 flex max-w-[230px] justify-between text-[11px] text-neutral-400">
-        <span>{range.min}</span>
-        <span>{range.max}</span>
-      </div>
-    </div>
   );
 }
 
@@ -1152,75 +1086,11 @@ function StatTable({ table, maxVisibleRows }: { table: SimpleTable; maxVisibleRo
 // to get the full, untruncated data.
 const RAW_TABLE_ROW_CAP = 200;
 
-// A filter for the raw table: one Study Design IV and its selected levels,
-// each with a test for whether a result row belongs to it.
-interface ResultFilter {
-  id: string;
-  label: string;
-  levels: { label: string; match: (r: ResultRow) => boolean }[];
-}
-
-// The results column each filterable IV lands in.
-const IV_RESULT_COLUMNS: Record<string, string[]> = {
-  xai_type: ["xai_type", "shown_xai_type"],
-  xai_property: ["xai_property", "exp_property"],
-  tested_xai: ["tested_w_xai"],
-};
-
-// The design's IVs that the results carry, with the levels the design picked.
-// Levels match the column ignoring case ("Attribution" vs "attribution");
-// Tested with XAI maps its levels onto the boolean tested_w_xai, where
-// training rows are blank and belong to neither level. Without a usable IV,
-// falls back to the condition the trial viewer reads off each row.
-function resultFiltersFor(ivs: IvEntry[], rows: ResultRow[], columns: string[]): ResultFilter[] {
-  const fromDesign = ivs.flatMap((iv): ResultFilter[] => {
-    const col = (IV_RESULT_COLUMNS[iv.factor] || []).find((c) => columns.includes(c));
-    const levels = ivLevelList(iv);
-    if (!col || levels.length < 2) return [];
-    const text = (r: ResultRow) => String(r[col] ?? "").trim().toLowerCase();
-    return [{
-      id: iv.factor,
-      label: iv.label || iv.factor,
-      levels: levels.map((l) => ({
-        label: l,
-        match: iv.factor === "tested_xai"
-          ? (r: ResultRow) => text(r) !== "" && (text(r) === "true" || text(r) === "1") === !/without/i.test(l)
-          : (r: ResultRow) => text(r) === l.trim().toLowerCase(),
-      })),
-    }];
-  });
-  if (fromDesign.length) return fromDesign;
-  const conditions = Array.from(new Set(rows.map(conditionOfRow).filter(Boolean)));
-  return conditions.length > 1
-    ? [{ id: "condition", label: conditionLabelOf(rows), levels: conditions.map((c) => ({ label: c, match: (r: ResultRow) => conditionOfRow(r) === c })) }]
-    : [];
-}
-
-const participantOf = (r: ResultRow) => String(r.participantId ?? r.participant_id ?? r.participant ?? "");
-
-// Rows come sorted by participant, and participants by condition, so the first
-// RAW_TABLE_ROW_CAP rows would only ever show the first condition. The table
-// filters by the Study Design's IV levels; with nothing picked, the cap is
-// spread evenly across the first IV's levels instead.
-function RawResultsTable({ rows, ivs }: { rows: ResultRow[]; ivs: IvEntry[] }) {
+function RawResultsTable({ rows }: { rows: ResultRow[] }) {
   const [open, setOpen] = useState(false);
-  const [picked, setPicked] = useState<Record<string, string>>({});
   if (!rows.length) return null;
   const columns = allColumnsOf(rows).filter((c) => !isHiddenResultColumn(c));
-  const filters = resultFiltersFor(ivs, rows, columns);
-  const levelOf = (f: ResultFilter) => f.levels.find((l) => l.label === picked[f.id]);
-  const matchesExcept = (r: ResultRow, skip: string) => filters.every((f) => f.id === skip || !levelOf(f) || levelOf(f)!.match(r));
-  const filtered = rows.filter((r) => matchesExcept(r, ""));
-  const anyPicked = filters.some((f) => levelOf(f));
-  const primary = filters[0];
-  const perLevel = primary ? Math.floor(RAW_TABLE_ROW_CAP / primary.levels.length) : RAW_TABLE_ROW_CAP;
-  const shown = anyPicked || !primary
-    ? filtered.slice(0, RAW_TABLE_ROW_CAP)
-    : primary.levels.flatMap((l) => rows.filter(l.match).slice(0, perLevel));
-  // Participants at a level, given what the other filters already narrow to.
-  const participantsAt = (f: ResultFilter, l: ResultFilter["levels"][number]) =>
-    new Set(rows.filter((r) => l.match(r) && matchesExcept(r, f.id)).map(participantOf)).size;
-  const pickedText = filters.filter((f) => levelOf(f)).map((f) => `${f.label} = ${picked[f.id]}`).join(", ");
+  const shown = rows.slice(0, RAW_TABLE_ROW_CAP);
 
   return (
     <div className="rounded-xl border border-neutral-200">
@@ -1235,30 +1105,6 @@ function RawResultsTable({ rows, ivs }: { rows: ResultRow[]; ivs: IvEntry[] }) {
       </button>
       {open ? (
         <div className="border-t border-neutral-100">
-          {filters.length ? (
-            <div className="space-y-1.5 border-b border-neutral-100 px-3 py-2">
-              {filters.map((f) => (
-                <div key={f.id} className="flex flex-wrap items-center gap-1.5">
-                  <span className="mr-1 w-28 shrink-0 truncate text-[11px] font-medium text-neutral-500">{f.label}</span>
-                  {[null, ...f.levels].map((l) => {
-                    const on = (picked[f.id] ?? "") === (l?.label ?? "");
-                    return (
-                      <button
-                        key={l?.label ?? "all"}
-                        type="button"
-                        onClick={() => setPicked({ ...picked, [f.id]: l?.label ?? "" })}
-                        className={cn("rounded-full border px-2.5 py-0.5 text-xs transition-colors", on ? "border-transparent text-white" : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-100")}
-                        style={on ? { backgroundColor: ACCENT } : undefined}
-                      >
-                        {l ? `${l.label} · ${participantsAt(f, l)}` : "All"}
-                      </button>
-                    );
-                  })}
-                </div>
-              ))}
-              <p className="text-[11px] text-neutral-400">Levels from your Study Design · numbers are participants.</p>
-            </div>
-          ) : null}
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="text-neutral-400">
@@ -1279,16 +1125,9 @@ function RawResultsTable({ rows, ivs }: { rows: ResultRow[]; ivs: IvEntry[] }) {
               </tbody>
             </table>
           </div>
-          {!shown.length ? (
-            <p className="border-t border-neutral-100 px-3 py-2 text-[11px] text-neutral-400">No rows for {pickedText}.</p>
-          ) : filtered.length > shown.length ? (
+          {rows.length > RAW_TABLE_ROW_CAP ? (
             <p className="border-t border-neutral-100 px-3 py-2 text-[11px] text-neutral-400">
-              {anyPicked
-                ? `Showing first ${shown.length} of ${filtered.length} rows for ${pickedText}`
-                : primary
-                  ? `Showing ${shown.length} of ${rows.length} rows, the first ${perLevel} of each ${primary.label} level`
-                  : `Showing first ${shown.length} of ${rows.length} rows`}{" "}
-              — use Results CSV for the full data.
+              Showing first {RAW_TABLE_ROW_CAP} of {rows.length} rows — use Results CSV for the full data.
             </p>
           ) : null}
         </div>
@@ -1434,7 +1273,7 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
   const [token, setToken] = useState("");
   // Runs always simulate the whole experiment; the narrower /simulate modes are
   // not exposed here.
-  const mode: SimulationMode = "auto";
+  const mode: SimulationMode = "whole_experiment";
   const [stages, setStages] = useState<StageProgress[]>([]);
   const [error, setError] = useState("");
   const [outcome, setOutcome] = useState<RunOutcome | null>(null);
@@ -1558,8 +1397,7 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
     a.user_model || "",
     hasXaiPropertyIv(a),
     parseCogConfig(a),
-    mode,
-    cogRangesPayload(a)
+    mode
   );
   const comparisonStudy = humanComparisonStudyFor(a.user_model || "", hasXaiPropertyIv(a));
 
@@ -1658,7 +1496,6 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
   const activeCond = conditions.includes(cond) ? cond : conditions[0] ?? "";
   const cViews = activeCond ? views.filter((v) => v.condition === activeCond) : views;
   const participantIds = Array.from(new Set(cViews.map((v) => v.participantId).filter(Boolean)));
-  const runParticipants = new Set(views.map((v) => v.participantId).filter(Boolean)).size;
   const activePid = participantIds.includes(pid) ? pid : participantIds[0] ?? "";
   const pViews = activePid ? cViews.filter((v) => v.participantId === activePid) : cViews;
   const trialAt = pViews.length ? Math.min(trialIdx, pViews.length - 1) : 0;
@@ -2075,9 +1912,9 @@ export function ResultsBody({ answers, setAnswer }: { answers: Answers; setAnswe
             {rows.length ? (
               <div className="space-y-2">
                 <p className="text-xs text-neutral-400">
-                  {rows.length} row{rows.length === 1 ? "" : "s"} · {runParticipants} participant{runParticipants === 1 ? "" : "s"} in this run — use Results CSV for the full data.
+                  {rows.length} row{rows.length === 1 ? "" : "s"} · {participantIds.length} participant{participantIds.length === 1 ? "" : "s"} in {activeCond || "this run"} — use Results CSV for the full data.
                 </p>
-                <RawResultsTable rows={rows} ivs={parseIvs(a)} />
+                <RawResultsTable rows={rows} />
               </div>
             ) : null}
           </div>
