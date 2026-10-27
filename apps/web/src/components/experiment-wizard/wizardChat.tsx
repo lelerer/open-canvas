@@ -24,12 +24,13 @@ export const ALL_FILLABLE = [
   "proc_steps",
   "user_model",
   "cog_config",
+  "cog_ranges",
 ];
 
 export const APPLY_KEYS = new Set(ALL_FILLABLE);
 // Keys whose APPLY value is a JSON array/object rather than a plain string.
 
-export const STRUCTURED_APPLY = new Set(["sd_ivs", "sd_dv", "sd_cv", "sd_rv", "proc_steps", "cog_config", "apparatus_list"]);
+export const STRUCTURED_APPLY = new Set(["sd_ivs", "sd_dv", "sd_cv", "sd_rv", "proc_steps", "cog_config", "cog_ranges", "apparatus_list"]);
 
 export const OP_TARGETS = new Set(["sd_dv", "sd_ivs", "sd_cv", "sd_rv", "proc_steps", "apparatus_list"]);
 
@@ -204,8 +205,8 @@ export const PAGE_CHAT: Record<string, { focus: string; fields: string[] }> = {
     fields: ["proc_steps"],
   },
   usermodel: {
-    focus: "the user model. You CAN set them: user_model (the cognitive model id, e.g. \"CoAX\" or \"CoXAM\") and cog_config (a JSON object of cognitive-parameter values). Help the user choose from the list.",
-    fields: ["user_model", "cog_config"],
+    focus: "the user model. You CAN set them: user_model (the cognitive model id, e.g. \"CoAX\" or \"CoXAM\"), cog_ranges (a JSON object of min–max ranges for the cognitive parameters) and cog_config (exact single values). Every parameter starts at its whole range. Help the user choose from the list.",
+    fields: ["user_model", "cog_ranges", "cog_config"],
   },
   review: {
     focus: "reviewing the overall design (there are no fields to fill on this page)",
@@ -233,7 +234,7 @@ export function buildChatContext(page: Page, a: Answers): string {
   lines.push(`- random variables (RV): ${varsSummary(parseVars(a.sd_rv)) || "(empty)"}`);
   lines.push(`- independent variables: ${ivLine}`);
   lines.push(`- procedure steps: ${procLine}`);
-  lines.push(`- cognitive config: ${cogConfigSummary(a) || "(defaults)"}`);
+  lines.push(`- cognitive config: ${cogConfigSummary(a) || "(all parameters at their whole range)"}`);
   const overview = lines.join("\n");
 
   const pageFields = cfg.fields.length ? cfg.fields.join(", ") : "(this page's structure is edited in the UI)";
