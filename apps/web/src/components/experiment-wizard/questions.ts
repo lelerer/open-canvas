@@ -847,10 +847,12 @@ export function ivSummaryLines(a: Answers): string[] {
   });
 }
 
+// The parameters the user changed, e.g. "Retrieval Threshold=-3–-1.5, Attended Features=3".
 export function cogConfigSummary(a: Answers): string {
-  let obj: Record<string, string> = {};
-  try { obj = JSON.parse(a.cog_config || "{}"); } catch { obj = {}; }
-  return Object.entries(obj).filter(([, v]) => String(v).trim()).map(([k, v]) => `${k}=${v}`).join(", ");
+  return resolvedCogParams(a)
+    .filter((p) => p.source === "set" || p.source === "range")
+    .map((p) => `${p.label}=${p.range ? (p.range.min === p.range.max ? p.range.min : `${p.range.min}–${p.range.max}`) : p.value}`)
+    .join(", ");
 }
 
 export function parseCogConfig(a: Answers): Record<string, string> {
@@ -872,9 +874,11 @@ export function manipulatedCogParams(a: Answers): Record<string, string> {
   return out;
 }
 
-// Every cognitive parameter of the selected user model with the value actually
-// in play: the one the user set, the levels it is varied over, or the model's
-// own default. This is what the design JSON exports.
+// Every cognitive parameter of the selected user model with the setting
+// actually in play. This is what the design JSON exports. A numeric parameter
+// is always a `range` (min = max for one value; the whole min–max untouched);
+// an option parameter is a `value`; one varied as an IV has its `levels`.
+// `source` says whether the user set it, and min/max are always the limits.
 export interface ResolvedCogParam {
   key: string;
   label: string;
@@ -885,9 +889,10 @@ export interface ResolvedCogParam {
   options?: string[];
   recommendedDefault?: string | number;
   modelDefault?: string | number;
-  value: string | number | null; // null when varied as an IV
+  range?: CogRange; // numeric: the span each virtual participant's value is picked from
+  value?: string | number | null; // option parameters (and numeric ones without limits)
   levels?: string; // the levels tested, when varied as an IV
-  source: "set" | "manipulated" | "model default";
+  source: "set" | "range" | "manipulated" | "model default";
   softBounds?: boolean;
   note?: string;
   detail?: string;
@@ -897,8 +902,9 @@ export function resolvedCogParams(a: Answers): ResolvedCogParam[] {
   const agent = cognitiveAgentForAnswers(a);
   if (!agent) return [];
   const cfg = parseCogConfig(a);
+  const ranges = parseCogRanges(a);
   const manipulated = manipulatedCogParams(a);
-  const coerce = (p: CognitiveParam, v: string | number | undefined): string | number | null => {
+  const coerce =(p: CognitiveParam, v: string | number | undefined): string | number | null => {
     if (v === undefined || v === null || String(v).trim() === "") return null;
     if (cogParamType(p) === "enum") return String(v);
     const n = Number(v);
@@ -921,21 +927,96 @@ export function resolvedCogParams(a: Answers): ResolvedCogParam[] {
       ...(p.softBounds ? { softBounds: true } : {}),
       ...(p.note ? { note: p.note } : {}),
       ...(p.detail ? { detail: p.detail } : {}),
-      value: null,
       source: "model default",
     };
-    if (manip !== undefined) return { ...base, value: null, levels: manip, source: "manipulated" };
-    if (set) return { ...base, value: coerce(p, set), source: "set" };
-    return { ...base, value: coerce(p, p.modelDefault), source: "model default" };
+    if (manip !== undefined) return { ...base, levels: manip, source: "manipulated" };
+    const full = cogParamType(p) !== "enum" ? cogParamRange(p) : null;
+    if (!full) return set ? { ...base, value: coerce(p, set), source: "set" } : { ...base, value: coerce(p, p.modelDefault) };
+    // Numeric: always a range. A single value (stored in cog_config) is min = max.
+    if (set && Number.isFinite(Number(set))) return { ...base, range: { min: Number(set), max: Number(set) }, source: "range" };
+    const range = ranges[p.name];
+    if (range) return { ...base, range, source: "range" };
+    return { ...base, range: full };
   });
 }
+
+const spanText = (r: CogRange) => (r.min === r.max ? `${r.min}` : `${r.min} to ${r.max}`);
 
 export function cogParamsSummaryLines(a: Answers): string[] {
   return resolvedCogParams(a).map((p) => {
     if (p.source === "manipulated") return `${p.label} (${p.key}): manipulated as an IV — ${p.levels || "(no levels set)"}`;
-    if (p.value === null) return `${p.label} (${p.key}): (model default)`;
+    if (p.range) return `${p.label} (${p.key}): ${spanText(p.range)}${p.source === "model default" ? " (full range, default)" : ""}`;
+    if (p.value === null || p.value === undefined) return `${p.label} (${p.key}): (model default)`;
     return `${p.label} (${p.key}): ${p.value}${p.source === "model default" ? " (model default)" : ""}`;
   });
+}
+
+// ---- Cognitive parameter ranges ----
+// A numeric parameter can be given a range instead of one value. The range is
+// a window, not a uniform draw: the fitted values are discrete (a few grid or
+// EM candidate points per condition), so the server is meant to pick each
+// virtual participant's value from the fitted values inside it. Untouched, a
+// parameter spans its whole range. A range collapsed to a single value is
+// stored in cog_config as before, and only a narrower span lives in
+// cog_ranges, so runs keep sending fixed values exactly as they did. A fixed
+// value in cog_config wins over a stale range (the assistant only sets those).
+export interface CogRange { min: number; max: number }
+
+export function parseCogRanges(a: Answers): Record<string, CogRange> {
+  try {
+    const o = JSON.parse(a.cog_ranges || "{}");
+    if (!o || typeof o !== "object") return {};
+    const out: Record<string, CogRange> = {};
+    for (const [k, v] of Object.entries(o as Record<string, any>)) {
+      const min = Number(v?.min);
+      const max = Number(v?.max);
+      if (Number.isFinite(min) && Number.isFinite(max) && min < max) out[k] = { min, max };
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+// Slider granularity: the catalog's own step, 1 for integers, else the largest
+// round step that still gives about 50 positions across the range.
+const ROUND_STEPS = [1, 0.5, 0.1, 0.05, 0.01, 0.005, 0.001];
+export function cogParamStep(p: CognitiveParam): number {
+  if (cogParamType(p) === "integer") return 1;
+  if (p.step) return p.step;
+  const r = cogParamRange(p);
+  if (!r) return 0.01;
+  return ROUND_STEPS.find((s) => s <= (r.max - r.min) / 50) ?? 0.001;
+}
+
+// Round to the step's precision so slider values don't carry float noise.
+export function snapToStep(v: number, step: number): number {
+  return Number(v.toFixed(Math.max(0, -Math.floor(Math.log10(step)))));
+}
+
+// Backend key → [min, max] for every parameter the user set (min = max for one
+// value), as sent on /simulate. The whole range is the default, so it isn't sent.
+export function cogRangesPayload(a: Answers): Record<string, [number, number]> {
+  const out: Record<string, [number, number]> = {};
+  for (const p of resolvedCogParams(a)) if (p.source === "range" && p.range) out[p.key] = [p.range.min, p.range.max];
+  return out;
+}
+
+export function isFullRange(p: CognitiveParam, span: [number, number]): boolean {
+  const r = cogParamRange(p);
+  return !!r && span[0] === r.min && span[1] === r.max;
+}
+
+// The span that applies to a numeric parameter: a fixed value, a range, or
+// (untouched) the whole range. Clamped into the catalog bounds.
+export function cogParamSpan(a: Answers, p: CognitiveParam): [number, number] | null {
+  const r = cogParamRange(p);
+  if (!r || cogParamType(p) === "enum") return null;
+  const clamp = (n: number) => Math.min(r.max, Math.max(r.min, n));
+  const v = (parseCogConfig(a)[p.name] ?? "").trim();
+  if (v && Number.isFinite(Number(v))) return [clamp(Number(v)), clamp(Number(v))];
+  const rg = parseCogRanges(a)[p.name];
+  return rg ? [clamp(rg.min), clamp(rg.max)] : [r.min, r.max];
 }
 
 export const DEFAULT_TRAINING_TRIALS = 10;

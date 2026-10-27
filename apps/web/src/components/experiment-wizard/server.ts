@@ -978,6 +978,29 @@ export function counterfactualVerdict(cf: TrialCounterfactual): { tone: "win" | 
     : { tone: "lose", text: "The change did not move the AI's prediction." };
 }
 
+// A row's condition: the runner's own condition name when it has one;
+// otherwise the XAI type, which is the actual manipulation. `withinCondition`
+// is last because CoAX fills it with the placeholder "single_condition" even
+// when the design has three conditions.
+export function conditionOfRow(row: ResultRow): string {
+  const named = asText(pick(row, ["condition_name"]));
+  if (named) return named;
+  // Sim2Real manipulates the explanation property instead of the XAI type.
+  const xai = asText(pick(row, ["xai_type", "shown_xai_type", "xai_property", "exp_property"]));
+  if (xai) return xai;
+  const within = asText(pick(row, ["withinCondition"]));
+  return PLACEHOLDER_CONDITIONS.has(within.toLowerCase()) ? "" : within;
+}
+
+// What conditionOfRow reads, as a heading for the condition picker.
+export function conditionLabelOf(rows: ResultRow[]): string {
+  const r = rows[0] || {};
+  if (asText(pick(r, ["condition_name"]))) return "Condition";
+  if (asText(pick(r, ["xai_type", "shown_xai_type"]))) return "XAI type";
+  if (asText(pick(r, ["xai_property", "exp_property"]))) return "XAI property";
+  return "Condition";
+}
+
 // Column names below are the ones a real run emits (agent_prediction,
 // ai_prediction, prob_correct, cognitive_correct_vs_ai, pred_time, instanceId,
 // …); the extra spellings are fallbacks for the other participant runners,
@@ -989,19 +1012,7 @@ export function trialViewOf(row: ResultRow): TrialView {
     phase: asText(pick(row, ["phase"])),
     step: asText(pick(row, ["step", "step_name", "stage"])),
     participantId: asText(pick(row, ["participantId", "participant_id", "participant"])),
-    // The runner's own condition name when it has one; otherwise the XAI type,
-    // which is the actual manipulation. `withinCondition` is last because CoAX
-    // fills it with the placeholder "single_condition" even when the design has
-    // three conditions.
-    condition: (() => {
-      const named = asText(pick(row, ["condition_name"]));
-      if (named) return named;
-      // Sim2Real manipulates the explanation property instead of the XAI type.
-      const xai = asText(pick(row, ["xai_type", "shown_xai_type", "xai_property", "exp_property"]));
-      if (xai) return xai;
-      const within = asText(pick(row, ["withinCondition"]));
-      return PLACEHOLDER_CONDITIONS.has(within.toLowerCase()) ? "" : within;
-    })(),
+    condition: conditionOfRow(row),
     datasetId: asText(pick(row, ["dataId", "dataset_id", "dataset", "appId"])),
     xaiType: asText(pick(row, ["xai_type"])),
     shownXaiType: asText(pick(row, ["shown_xai_type", "shownXaiType"])),
@@ -1050,7 +1061,7 @@ export function trialViewOf(row: ResultRow): TrialView {
 
 /* ------------------------------ the pipeline ------------------------------ */
 
-export type SimulationMode = "trial_by_trial" | "participant_by_participant" | "whole_condition" | "whole_experiment";
+export type SimulationMode = "auto" | "trial_by_trial" | "participant_by_participant" | "whole_condition" | "whole_experiment";
 
 export interface SimulateOptions {
   mode?: SimulationMode;
@@ -1060,6 +1071,9 @@ export interface SimulateOptions {
   coax_strategies?: Record<string, unknown>;
   coxam_eval_params?: Record<string, unknown>;
   sim2real_params?: Record<string, unknown>;
+  // Not read by the server yet — sent so it can pick each participant's
+  // values from the fitted values inside each range once it supports them.
+  cognitive_param_ranges?: Record<string, [number, number]>;
   [k: string]: unknown;
 }
 
@@ -1085,12 +1099,14 @@ export function frameworkFor(userModel: string, hasXaiPropertyIv: boolean): Stud
  * the UI's display labels, so the config is forwarded as-is.
  *
  * CoAX, CoXAM, and Sim2Real each accept their corresponding parameter payload.
+ * Parameter ranges ride along as their own field.
  */
 export function simulateOptionsFor(
   userModel: string,
   hasXaiPropertyIv: boolean,
   cogConfig: Record<string, string>,
-  mode: SimulationMode = "whole_experiment"
+  mode: SimulationMode = "whole_experiment",
+  paramRanges: Record<string, [number, number]> = {}
 ): { framework: StudyFramework; options: SimulateOptions; warning?: string } {
   const framework = frameworkFor(userModel, hasXaiPropertyIv);
   const values = Object.fromEntries(Object.entries(cogConfig || {}).filter(([, v]) => String(v ?? "").trim() !== ""));
@@ -1101,6 +1117,8 @@ export function simulateOptionsFor(
   else if (framework === "coxam" && hasValues) options.coxam_eval_params = values;
   else if (framework === "sim2real" && hasValues) options.sim2real_params = values;
   else if (framework === "baseline") options.baseline_model_id = userModel.trim();
+
+  if (framework !== "baseline" && Object.keys(paramRanges).length) options.cognitive_param_ranges = paramRanges;
 
   return { framework, options };
 }
